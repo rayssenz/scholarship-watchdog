@@ -29,7 +29,7 @@ Skills are invoked deliberately per stage rather than ad hoc.
 | 2. Specification drafting | `spec` (gstack) | turn intent into backlog-ready issues once the repo exists |
 | | `diagram` (gstack) | architecture diagram; the `.mmd` is the single source of truth |
 | | `claude-api` | authoritative model IDs, pricing and structured-output syntax |
-| | `humanizer` | strip AI-writing patterns from any document that ships |
+| | `humanizer` | editing pass: tighten prose before a document ships |
 | 3. Design review | adversarial subagents | independent architecture and fix review; findings applied, not filed |
 | | `vibesec` | **the security gate**: anything touching secrets, the profile, or CI |
 | 4. Implementation | `superpowers:writing-plans` | plan before code, every feature |

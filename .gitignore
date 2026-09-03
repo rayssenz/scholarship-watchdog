@@ -39,6 +39,12 @@ age-key.txt
 .gstack/
 .firecrawl/
 
+# Working plans. A phase plan drives the build and then stops being useful; it
+# is a working artifact, not documentation, and a few thousand generated lines
+# in the history read as bulk rather than as work. A short summary may be
+# committed once a phase lands.
+docs/plans/
+
 # Python
 __pycache__/
 *.py[cod]
