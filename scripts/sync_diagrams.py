@@ -44,7 +44,7 @@ def sync(doc: Path, srcs: list[str], check: bool) -> bool:
         return False
 
     updated = text
-    for block, src in zip(blocks, srcs):
+    for block, src in zip(blocks, srcs, strict=True):
         updated = updated.replace(block, f"```mermaid\n{src}\n```")
 
     if updated == text:
@@ -98,7 +98,7 @@ def prepare_svg(svg: Path, check: bool) -> bool:
     fixed = fixed[:-1] + f' width="{w}" height="{h}">'
     bg = f'<rect x="0" y="0" width="{w}" height="{h}" fill="#ffffff" {BG_MARK}/>'
 
-    body = OLD_BG.sub("", text[m.end():], count=1)
+    body = OLD_BG.sub("", text[m.end() :], count=1)
     rebuilt = fixed + bg + body
 
     if rebuilt == text:
