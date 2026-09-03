@@ -1,0 +1,165 @@
+# Source registry: English-taught master's funding.
+#
+# Every entry declares a `role`, and the role decides what is demanded of it.
+#
+# The first draft of this file registered fourteen URLs and asked the extractor
+# to pull a deadline from each. An audit fetched them all and found that none
+# contained one: every URL was an index or overview page, with the deadline a
+# click deeper. Because the extraction schema is optional-typed, that would have
+# failed silently, producing schema-valid records with null deadlines and no
+# error anywhere. The rebuild split the registry by role and re-pointed the
+# watch sources at pages verified to carry a date.
+#
+# Field reference:
+#   role           `watch` guards one programme's deadline and alerts if the
+#                  page stops yielding one. `discover` skims a portal for
+#                  programmes not yet seen; missing dates are expected and never
+#                  alert, and its records cap at `shortlist` until promotion.
+#   fetcher        httpx (free) or firecrawl (renders JS, costs credits).
+#                  Assigned by measurement: see scripts/probe_sources.py.
+#   recurs         annual (default) or one-off. Drives `next-cycle` routing for
+#                  passed deadlines. Set here, never extracted, because a model
+#                  should not guess whether a programme repeats.
+#   country        the date-convention hint passed to extraction. Null on a
+#                  multi-country portal, where inheriting one country would
+#                  transpose DD/MM dates on the others.
+#   institution    default for records from this source, since government
+#                  schemes have no stable institution name to extract.
+#   verified       date of the last successful probe, and what it found.
+#
+# A firecrawl source is skipped with a warning when no API key is present, so
+# the project stays runnable without one. Two consecutive skips raise an alert;
+# a flagship source must not vanish quietly.
+#
+# Country-specific sources (a Fulbright national commission, a Japanese embassy)
+# live in config/sources.local.yaml, gitignored: naming them names a country,
+# and country is part of the eligibility profile.
+
+defaults:
+  fetcher: httpx
+  rate_limit_seconds: 2
+  recurs: annual
+
+sources:
+  # ---- watch: one programme, one page, deadline guarded -------------------
+
+  - id: daad-study-scholarship
+    name: DAAD Study Scholarship, master's
+    role: watch
+    url: https://www2.daad.de/deutschland/stipendium/datenbank/en/21148-scholarship-database/?detail=50026200
+    country: DE
+    institution: DAAD
+    verified: "2026-09-03: 1 October 2027, 9 deadline keywords"
+
+  - id: daad-helmut-schmidt
+    name: DAAD Helmut-Schmidt-Programme
+    role: watch
+    url: https://www2.daad.de/deutschland/stipendium/datenbank/en/21148-scholarship-database/?detail=57742130
+    country: DE
+    institution: DAAD
+    verified: "2026-09-03: 1 October 2027, 12 deadline keywords"
+
+  - id: knight-hennessy-deadlines
+    name: Knight-Hennessy Scholars, application deadlines
+    role: watch
+    url: https://knight-hennessy.stanford.edu/admission/preparing-your-applications/application-deadlines
+    country: US
+    institution: Stanford University
+    verified: "2026-09-03: October 6, 2026, 11 deadline keywords"
+
+  - id: nus-research-scholarship
+    name: NUS Research Scholarship
+    role: watch
+    url: https://nusgs.nus.edu.sg/scholarships/nus-research-scholarship
+    country: SG
+    fetcher: firecrawl
+    institution: National University of Singapore
+    verified: "2026-09-03 via Firecrawl: 1 January 2026, 3 deadline keywords. Returns 0 characters to a plain fetch."
+
+  # ---- discover: portals skimmed for programmes not yet seen -------------
+
+  - id: daad-database
+    name: DAAD scholarship database
+    role: discover
+    url: https://www2.daad.de/deutschland/stipendium/datenbank/en/21148-scholarship-database/
+    country: DE
+    institution: DAAD
+    verified: "2026-09-03: 0 dates, 0 keywords. A search application, not a document, so no crawl reaches its results. Kept as discover because its ?detail= leaf pages are the best-verified watch sources in this registry."
+
+  - id: csc-campuschina
+    name: Chinese Government Scholarship, CampusChina
+    role: discover
+    url: https://www.campuschina.org/scholarships/index.html
+    country: CN
+    fetcher: firecrawl
+    institution: Chinese Scholarship Council
+    verified: "2026-09-03 via Firecrawl: 0 dates, 0 keywords. Site root unreachable to both fetchers; this deep path renders. Index of scholarship types."
+
+  - id: csc-studyinchina
+    name: CSC Study in China portal
+    role: discover
+    url: https://studyinchina.csc.edu.cn/
+    country: CN
+    fetcher: firecrawl
+    institution: Chinese Scholarship Council
+    verified: "2026-09-03: firecrawl-only, largely Chinese-language. Second CSC entry point so the flagship source does not depend on one flaky URL."
+
+  - id: tsinghua-cgs
+    name: Tsinghua University, Chinese Government Scholarship
+    role: discover
+    url: https://yz.tsinghua.edu.cn/en/info/1027/1117.htm
+    country: CN
+    institution: Tsinghua University
+    verified: "2026-09-03: 3 deadline keywords, 0 dates. Closest of the original registry to a watch page; promote if a dated leaf is found."
+
+  - id: ntu-postgrad-scholarships
+    name: NTU Singapore, postgraduate scholarships
+    role: discover
+    url: https://www.ntu.edu.sg/admissions/graduate/financialmatters/scholarships
+    country: SG
+    institution: Nanyang Technological University
+    verified: "2026-09-03: 0 dates, 0 keywords. Lists named scholarships, each with its own page. The NPGS leaf was probed and also carries no date, so promotion depends on discovery finding a dated one."
+
+  - id: mext-scholarships
+    name: MEXT Japanese Government Scholarship
+    role: discover
+    url: https://www.studyinjapan.go.jp/en/planning/scholarships/mext-scholarships/
+    country: JP
+    institution: MEXT
+    verified: "2026-09-03: 0 dates, 0 keywords. Deadlines are set per embassy and never appear on this domain; the user's embassy page belongs in sources.local.yaml."
+
+  - id: jasso-scholarships
+    name: JASSO scholarships for international students
+    role: discover
+    url: https://www.jasso.go.jp/en/ryugaku/scholarship_j/index.html
+    country: JP
+    institution: JASSO
+    verified: "2026-09-03: 0 dates, 0 keywords. Index of scholarship types."
+
+  - id: kyoto-scholarships
+    name: Kyoto University scholarships
+    role: discover
+    url: https://www.kyoto-u.ac.jp/en/current/how-to/financial-aid/scholarships-for-international-students
+    country: JP
+    institution: Kyoto University
+    verified: "2026-09-03: 1 deadline keyword, 0 dates. Replaces the English-taught-programmes URL from the first draft, which listed degrees rather than funding."
+
+  - id: fulbright-foreign-student
+    name: Fulbright Foreign Student Program
+    role: discover
+    url: https://foreign.fulbrightonline.org/about/foreign-student-program
+    country: null
+    institution: Fulbright
+    candidate_pattern: "/commissions?/"
+    verified: "2026-09-03: 1 deadline keyword, 0 dates. Links to roughly 160 national commission pages, so country is null: inheriting US would give a commission page the wrong date convention. candidate_pattern keeps the verification queue from flooding."
+
+# Dropped in the rebuild
+#
+#   pku-english-masters   isd.pku.edu.cn/en/teachinglist.php?category2=29
+#     12 dates and 0 deadline keywords: the dates were news timestamps. A
+#     programme list, not a funding page, so it fails as watch and yields
+#     nothing as discover.
+#
+#   fulbright-apply       foreign.fulbrightonline.org/apply
+#     Duplicated fulbright-foreign-student's coverage with the same limitation.
+#     One entry point to a per-country programme is enough.

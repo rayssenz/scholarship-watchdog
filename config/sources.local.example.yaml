@@ -1,0 +1,28 @@
+# Country-specific sources: sanitised template.
+#
+# Copy to config/sources.local.yaml and fill in. That file is gitignored,
+# because naming your Fulbright commission or your embassy names your country,
+# and country is part of the eligibility profile. SPEC.md section 5.
+#
+# This file is human-owned: the local copy is authoritative and a run never
+# writes it. config/watched.local.yaml is the opposite, machine-owned and
+# written by promotion, so it has no template here.
+#
+# Same schema as config/sources.yaml. These entries exist separately only
+# because they are private, not because they behave differently.
+
+sources:
+  # Fulbright deadlines are set by each national commission and never appear on
+  # the international site, so the commission page is the only real watch source.
+  - id: fulbright-local-commission
+    name: Fulbright, national commission
+    url: https://REPLACE-ME.fulbright.example/apply
+    country: XX
+    role: watch
+
+  # MEXT deadlines are set per embassy for the same reason.
+  - id: mext-local-embassy
+    name: MEXT, embassy of Japan
+    url: https://REPLACE-ME.emb-japan.go.jp/scholarship
+    country: XX
+    role: watch

@@ -1,0 +1,49 @@
+# Eligibility profile: sanitised template.
+#
+# Copy to config/profile.yaml and fill in with real values. profile.yaml is
+# gitignored and must never be committed: scoring is derived from it, so
+# publishing it or anything shaped by it leaks citizenship and eligibility.
+# SPEC.md section 5 has the full rule.
+#
+# In GitHub Actions the same content is supplied as a secret, not a file.
+
+citizenship: XX                 # ISO country code
+residency: XX
+date_of_birth: 1990-01-01       # used only for age-limit blockers
+
+degree:
+  held: bachelor                # highest completed: bachelor / master / phd
+  seeking: master
+
+languages:
+  - code: en
+    certificate: IELTS
+    score: 7.0
+  - code: de
+    certificate: null           # null means no certificate held
+    score: null
+
+experience_years: 0
+
+# Hard blockers. A record matching any of these is rejected outright, and the
+# rejection is traceable to the rule that caused it.
+blockers:
+  degree_level_mismatch: true   # reject if the programme is not `degree.seeking`
+  nationality_excluded: true    # reject if citizenship is on an exclusion list
+
+# Soft signals. Points accumulate on the 0 to 100 scale defined in SPEC 3.3.
+weights:
+  funding_full: 30
+  funding_partial: 10
+  stipend_above_threshold: 15
+  stipend_threshold_eur_month: 800
+  language_match: 15
+  no_certificate_gap: 10
+  application_route_direct: 5
+
+# Tier thresholds. Defaults from SPEC.md section 3.3; override here if wanted.
+tiers:
+  act_now: 70
+  shortlist: 40
+
+promotion_min_fit: 55

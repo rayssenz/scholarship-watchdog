@@ -1,0 +1,12 @@
+graph TD
+    cron[same weekly run,<br/>after watch sources] --> extract
+    portals[discover sources<br/>DAAD, CSC, NTU portals] --> extract[extract stubs.<br/>name + candidate_url]
+    extract --> haslink{candidate_url<br/>present?}
+    haslink -->|no| report[report once<br/>as unpromotable]
+    haslink -->|yes| queue[verification queue.<br/>FIFO, capped per run]
+    queue --> verify[fetch leaf page,<br/>run full extraction]
+    verify --> score[score deterministically<br/>against profile]
+    score --> gate{fitness gate passes,<br/>and capacity free?}
+    gate -->|no| hold[hold or reject.<br/>re-gated every run,<br/>no refetch]
+    gate -->|yes| promote[promote to<br/>watched.local.yaml]
+    promote -->|fetched from<br/>the next run| registry[(source registry<br/>public + local + promoted)]

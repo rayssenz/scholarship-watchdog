@@ -1,0 +1,16 @@
+graph TD
+    cron[GitHub Actions<br/>weekly cron] --> fetch
+    registry[(source registry<br/>public + local + promoted)] --> fetch[fetch page<br/>httpx or Firecrawl]
+    fetch --> health{health check<br/>passes?}
+    health -->|no| alert[alert.<br/>evict after three<br/>consecutive failures]
+    health -->|yes| diff{content hash<br/>changed?}
+    diff -->|no| skip[skip page.<br/>no LLM call]
+    diff -->|yes| extract[extract<br/>Gemini 3.8 Flash<br/>structured output]
+    extract --> score[score deterministically.<br/>no LLM call]
+    profile[(profile.yaml<br/>never sent to the model)] --> score
+    score --> tier{in notify tiers?<br/>act-now or next-cycle}
+    tier -->|no| store
+    tier -->|yes| delta{new record, or<br/>content hash moved?}
+    delta -->|no| store
+    delta -->|yes| notify[email digest]
+    notify --> store[(records.jsonl public<br/>notified log encrypted)]

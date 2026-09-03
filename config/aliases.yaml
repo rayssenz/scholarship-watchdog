@@ -1,0 +1,18 @@
+# Hand-maintained identity merges, public.
+#
+# The identity hash is sha256(source_id:normalize(program)). Normalisation
+# reduces paraphrase churn but does not eliminate it, so the same programme
+# listed on two public sources can end up as two records. Add an entry here
+# when you notice a duplicate.
+#
+# Aliases written automatically at verification time (stub to leaf) live in the
+# private bundle instead, because they reveal which candidates were promoted.
+# See SPEC.md sections 3.4 and 5.
+
+aliases: []
+# Example:
+# aliases:
+#   - merge:
+#       - csc-campuschina:chinese-government-scholarship
+#       - tsinghua-cgs:chinese-government-scholarship
+#     as: "CSC Chinese Government Scholarship"
