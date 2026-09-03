@@ -45,6 +45,10 @@ age-key.txt
 # committed once a phase lands.
 docs/plans/
 
+# Build scratch: task briefs, progress ledgers, review packages. Working
+# artifacts of how the code got written, never part of the code.
+.superpowers/
+
 # Python
 __pycache__/
 *.py[cod]
