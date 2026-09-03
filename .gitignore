@@ -1,0 +1,54 @@
+# Private, never commit. See SPEC.md section 5.
+#
+# The rule these entries enforce: anything shaped by the eligibility profile is
+# private, including every artifact produced by acting on it. A leak here is the
+# one unrecoverable mistake in this project.
+
+# The real eligibility profile. profile.example.yaml is the committed template.
+profile.yaml
+profile.yml
+
+# Country-specific sources and the auto-promoted watch list. Both are derived
+# from or reveal the profile. Unanchored on purpose: a copy of one of these
+# outside config/ leaks exactly as much as the original.
+*.local.yaml
+*.local.yml
+
+# Runtime state. main is code-only and `data` is an orphan branch written by
+# the workflow, so nothing here belongs in a commit on main. The path itself is
+# the leak: snapshots/<source_id>/ names a private source, and a directory
+# named for the user's embassy names their country. The data branch carries its
+# own .gitignore without this line rather than the workflow using `git add -f`.
+data/
+
+# Decrypted private bundle. The run decrypts outside the working tree, but this
+# is the second line of defence if that ever regresses.
+.private/
+*.decrypted
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.age
+*.key
+*.age.key
+age-key.txt
+
+# Tool scratch
+.gstack/
+.firecrawl/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# OS
+.DS_Store
