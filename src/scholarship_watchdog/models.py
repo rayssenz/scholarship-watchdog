@@ -1,0 +1,172 @@
+"""The schemas every stage agrees on. See SPEC.md section 3.2.
+
+Every extracted field except `program` is optional-typed. That is deliberate:
+absence is recorded as absence, because a hallucinated deadline is worse than a
+missing one. Section 3.3 defines what each absence means to scoring, so the
+optionality does not silently push the decision into whatever the code happens
+to do.
+"""
+
+from __future__ import annotations
+
+from datetime import date
+from typing import Literal, Self
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+Role = Literal["watch", "discover"]
+FetcherName = Literal["httpx", "firecrawl"]
+Recurs = Literal["annual", "one-off"]
+DegreeLevel = Literal["bachelor", "master", "phd", "postdoc"]
+FundingType = Literal["full", "partial", "tuition-only", "none"]
+ApplicationRoute = Literal["direct", "agency", "embassy"]
+StipendPeriod = Literal["month", "year", "total"]
+
+
+class Strict(BaseModel):
+    """Reject unknown fields, and never print the value that was rejected.
+
+    `extra="forbid"` means a model that invents a field, or a config file with
+    a typo in a key, fails at the boundary instead of being silently discarded.
+
+    `hide_input_in_errors` closes a leak the redacted `__repr__` below does not
+    reach. Pydantic's default ValidationError message embeds the offending
+    input, so one malformed line in `profile.yaml` or `sources.local.yaml`
+    produces a traceback containing a citizenship code or a commission URL. In
+    P3 that traceback lands in a GitHub Actions log, which is public on a
+    public repository.
+    """
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+
+class Stipend(Strict):
+    amount: float | None = None
+    currency: str | None = None
+    period: StipendPeriod | None = None
+
+
+class LanguageCertificate(Strict):
+    certificate: str | None = None
+    minimum_score: float | None = None
+
+
+class NationalityRestrictions(Strict):
+    eligible: list[str] | None = None
+    excluded: list[str] | None = None
+
+
+class ScholarshipRecord(Strict):
+    """One normalized opportunity, as extracted from one page."""
+
+    program: str
+    institution: str | None = None
+    degree_level: DegreeLevel | None = None
+    language_of_instruction: str | None = None
+    funding_type: FundingType | None = None
+    stipend: Stipend | None = None
+    deadline: date | None = None
+    deadline_raw: str | None = None
+    nationality_restrictions: NationalityRestrictions | None = None
+    language_certificate: LanguageCertificate | None = None
+    experience_requirement: str | None = None
+    application_route: ApplicationRoute | None = None
+    source_url: str
+    candidate_url: str | None = None
+
+    @model_validator(mode="after")
+    def _a_parsed_deadline_keeps_its_source_string(self) -> Self:
+        if self.deadline is not None and not self.deadline_raw:
+            raise ValueError(
+                "deadline_raw is required whenever deadline is set: without the "
+                "original string a DD.MM transposition is invisible"
+            )
+        return self
+
+
+class Source(Strict):
+    """One registered page and what the run is allowed to demand of it."""
+
+    id: str
+    name: str
+    role: Role
+    url: str
+    country: str | None = None
+    institution: str | None = None
+    fetcher: FetcherName = "httpx"
+    recurs: Recurs = "annual"
+    rate_limit_seconds: float = 2.0
+    candidate_pattern: str | None = None
+    verified: str | None = None
+    private: bool = Field(
+        default=False,
+        description=(
+            "True when this source came from a gitignored config file. Every "
+            "artifact produced from it is private; see SPEC.md section 5."
+        ),
+    )
+
+    @property
+    def is_watch(self) -> bool:
+        return self.role == "watch"
+
+    @property
+    def is_discover(self) -> bool:
+        return self.role == "discover"
+
+
+class DegreeProfile(Strict):
+    held: DegreeLevel
+    seeking: DegreeLevel
+
+
+class LanguageSkill(Strict):
+    code: str
+    certificate: str | None = None
+    score: float | None = None
+
+
+class Blockers(Strict):
+    degree_level_mismatch: bool = True
+    nationality_excluded: bool = True
+
+
+class Weights(Strict):
+    funding_full: int = 30
+    funding_partial: int = 10
+    stipend_above_threshold: int = 15
+    stipend_threshold_eur_month: int = 800
+    language_match: int = 15
+    no_certificate_gap: int = 10
+    application_route_direct: int = 5
+
+
+class Tiers(Strict):
+    act_now: int = 70
+    shortlist: int = 40
+
+
+class Profile(Strict):
+    """The private eligibility profile. Loaded, never logged, never committed."""
+
+    citizenship: str
+    residency: str
+    date_of_birth: date
+    degree: DegreeProfile
+    languages: list[LanguageSkill] = Field(default_factory=list)
+    experience_years: int = 0
+    blockers: Blockers = Field(default_factory=Blockers)
+    weights: Weights = Field(default_factory=Weights)
+    tiers: Tiers = Field(default_factory=Tiers)
+    promotion_min_fit: int = 55
+
+    def __repr__(self) -> str:
+        """Never render profile contents.
+
+        A profile in a traceback, a log line or a pytest assertion diff is the
+        leak this project exists to avoid. Section 5 calls it the one
+        unrecoverable mistake.
+        """
+        return "Profile(<redacted>)"
+
+    __str__ = __repr__
