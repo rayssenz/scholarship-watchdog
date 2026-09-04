@@ -270,6 +270,12 @@ data/
   private.age                            everything else; see section 5
 ```
 
+Before P3 builds the bundle, private snapshots and counters go to a gitignored
+`.private/` directory in the checkout root. The destination is chosen in one
+module rather than at each call site, because section 5 records this leak being
+rediscovered four times, and every rediscovery was a new output path applying
+the rule from memory.
+
 **Write protocol.** The run is a single pass, and the ordering is load-bearing at three points:
 
 ```
