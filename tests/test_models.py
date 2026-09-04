@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 from pydantic import ValidationError
 
-from scholarship_watchdog.models import Profile, ScholarshipRecord, Source
+from scholarship_watchdog.models import Profile, ScholarshipRecord, Source, safe_errors
 
 
 def _minimal_record(**overrides: object) -> dict:
@@ -114,6 +114,12 @@ def test_a_rejected_profile_value_is_not_echoed_in_the_error():
     A ValidationError renders the input it rejected by default, so a malformed
     profile leaks the value through a traceback rather than through a log line
     someone wrote. In P3 that traceback is a public Actions log.
+
+    `hide_input_in_errors` only covers the string form. `exc.errors()` and
+    `exc.json()` are a separate leak path that the same flag does not close;
+    this pins that boundary as a tested fact so a pydantic release that
+    changed it would fail this suite rather than silently changing exposure.
+    `safe_errors()` is the accessor that closes it.
     """
     with pytest.raises(ValidationError) as caught:
         Profile(
@@ -122,4 +128,26 @@ def test_a_rejected_profile_value_is_not_echoed_in_the_error():
             date_of_birth="not-a-date",
             degree={"held": "bachelor", "seeking": "master"},
         )
-    assert "not-a-date" not in str(caught.value)
+    exc = caught.value
+    assert "not-a-date" not in str(exc)
+    assert "not-a-date" in str(exc.errors())
+    assert "not-a-date" in exc.json()
+    assert "not-a-date" not in str(safe_errors(exc))
+
+
+def test_a_rejected_source_value_is_not_echoed_in_the_error():
+    """The Source-side equivalent: sources.local.yaml is private config too,
+    and there was previously no test covering this leak path for Source."""
+    with pytest.raises(ValidationError) as caught:
+        Source(
+            id="x",
+            name="X",
+            role="watch",
+            url="https://example.org/x",
+            rate_limit_seconds="ZZ-SECRET-COMMISSION",
+        )
+    exc = caught.value
+    assert "ZZ-SECRET-COMMISSION" not in str(exc)
+    assert "ZZ-SECRET-COMMISSION" in str(exc.errors())
+    assert "ZZ-SECRET-COMMISSION" in exc.json()
+    assert "ZZ-SECRET-COMMISSION" not in str(safe_errors(exc))

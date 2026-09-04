@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 Role = Literal["watch", "discover"]
 FetcherName = Literal["httpx", "firecrawl"]
@@ -24,20 +24,41 @@ StipendPeriod = Literal["month", "year", "total"]
 
 
 class Strict(BaseModel):
-    """Reject unknown fields, and never print the value that was rejected.
+    """Reject unknown fields, and keep rejected values out of `str()`/`repr()`.
 
     `extra="forbid"` means a model that invents a field, or a config file with
     a typo in a key, fails at the boundary instead of being silently discarded.
 
-    `hide_input_in_errors` closes a leak the redacted `__repr__` below does not
-    reach. Pydantic's default ValidationError message embeds the offending
-    input, so one malformed line in `profile.yaml` or `sources.local.yaml`
-    produces a traceback containing a citizenship code or a commission URL. In
-    P3 that traceback lands in a GitHub Actions log, which is public on a
-    public repository.
+    `hide_input_in_errors` closes a leak the redacted `Profile.__repr__` below
+    does not reach: Pydantic's default ValidationError *string* message embeds
+    the offending input, so one malformed line in `profile.yaml` or
+    `sources.local.yaml` would otherwise produce a traceback containing a
+    citizenship code or a commission URL. In P3 that traceback lands in a
+    GitHub Actions log, which is public on a public repository.
+
+    This flag only covers the string form (`str(exc)`, `repr(exc)`). The
+    *structured* form still carries the raw input by default: both
+    `exc.errors()` and `exc.json()` embed it regardless of this setting. Any
+    code that reports a ValidationError over `Profile` or `Source` input must
+    call `safe_errors(exc)` below instead of `exc.errors()` directly.
     """
 
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+
+def safe_errors(exc: ValidationError) -> list[dict]:
+    """The structured error list, with the rejected input stripped out.
+
+    `hide_input_in_errors` on `Strict` only suppresses the input from the
+    *string* rendering of a ValidationError; `exc.errors()` and `exc.json()`
+    both embed the raw value that failed validation regardless of that
+    setting. For `Profile` and `Source`, that value can be a citizenship code
+    or a private commission URL, so any code that reports a validation
+    failure over their input (Task 3's config loader, for one) must call this
+    instead of `exc.errors()` to avoid putting it in a log or a public Actions
+    run.
+    """
+    return exc.errors(include_input=False)
 
 
 class Stipend(Strict):
