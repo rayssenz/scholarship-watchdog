@@ -82,4 +82,4 @@ python scripts/probe_sources.py
 
 Every registered source must fetch, and every source with `role: watch` must contain a parseable deadline. A `discover` source is not failed for lacking one.
 
-The probe reports three states: clean, failing, or unresolved. As of 2026-09-03, after the registry rebuild, it reports `13/13 sources clean, 0 unresolved, 0 failing`. Stage 2 is complete.
+The probe reports three states: clean, failing, or unresolved. After the registry rebuild on 2026-09-03 it reported `13/13 sources clean, 0 unresolved, 0 failing`, and stage 2 closed on that result. A re-run on 2026-09-04 reported 12/13: the Knight-Hennessy deadlines page began returning 358 characters to a plain fetch with no dates and no deadline keywords, having yielded a date and eleven keywords the day before. The page went client-rendered, so the registry entry moved to the browser-rendering fetcher. The episode is worth recording rather than editing away: a watch source losing its deadline inside a day is precisely the breakage section 3.1's health check exists to catch, and it happened before the code that catches it was written.

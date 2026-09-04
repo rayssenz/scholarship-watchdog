@@ -64,8 +64,9 @@ sources:
     role: watch
     url: https://knight-hennessy.stanford.edu/admission/preparing-your-applications/application-deadlines
     country: US
+    fetcher: firecrawl
     institution: Stanford University
-    verified: "2026-09-03: October 6, 2026, 11 deadline keywords"
+    verified: "2026-09-04: returns 358 characters to a plain fetch, 0 dates, 0 keywords. Reassigned to firecrawl. On 2026-09-03 the same URL yielded October 6, 2026 and 11 deadline keywords to httpx, so the page went client-rendered inside a day. Re-verify the deadline once a Firecrawl key is configured."
 
   - id: nus-research-scholarship
     name: NUS Research Scholarship
