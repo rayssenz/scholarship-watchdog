@@ -25,6 +25,14 @@ def test_a_record_without_a_program_is_rejected():
         ScholarshipRecord(source_url="https://example.org/a")
 
 
+def test_a_record_with_an_empty_program_is_rejected():
+    """SPEC 3.2: program is the only model-produced component of the identity
+    hash. An empty string would hash to a real, stable identity, silently
+    occupying an identity slot at Task 8's dual hashing."""
+    with pytest.raises(ValidationError):
+        ScholarshipRecord(**_minimal_record(program=""))
+
+
 def test_an_unknown_field_is_rejected():
     """SPEC 3.2: a prompt change inventing a field must fail, not be dropped.
 
@@ -43,6 +51,13 @@ def test_a_parsed_deadline_requires_the_raw_string_it_came_from():
     """
     with pytest.raises(ValidationError, match="deadline_raw"):
         ScholarshipRecord(**_minimal_record(deadline=date(2027, 3, 4)))
+
+
+def test_a_whitespace_only_raw_string_does_not_satisfy_the_audit_guard():
+    """A raw string of spaces satisfies `not deadline_raw` without carrying
+    anything to audit, which defeats the whole point of the field."""
+    with pytest.raises(ValidationError, match="deadline_raw"):
+        ScholarshipRecord(**_minimal_record(deadline=date(2027, 3, 4), deadline_raw="   "))
 
 
 def test_a_deadline_with_its_raw_string_is_accepted():

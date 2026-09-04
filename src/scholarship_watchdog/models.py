@@ -80,7 +80,14 @@ class NationalityRestrictions(Strict):
 class ScholarshipRecord(Strict):
     """One normalized opportunity, as extracted from one page."""
 
-    program: str
+    program: str = Field(
+        min_length=1,
+        description=(
+            "The only model-produced component of the identity hash (SPEC "
+            "3.2). An empty program would hash to a real, stable identity, "
+            "silently occupying an identity slot."
+        ),
+    )
     institution: str | None = None
     degree_level: DegreeLevel | None = None
     language_of_instruction: str | None = None
@@ -97,7 +104,7 @@ class ScholarshipRecord(Strict):
 
     @model_validator(mode="after")
     def _a_parsed_deadline_keeps_its_source_string(self) -> Self:
-        if self.deadline is not None and not self.deadline_raw:
+        if self.deadline is not None and not (self.deadline_raw or "").strip():
             raise ValueError(
                 "deadline_raw is required whenever deadline is set: without the "
                 "original string a DD.MM transposition is invisible"
