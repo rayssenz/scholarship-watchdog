@@ -111,6 +111,14 @@ An unchanged page terminates the pipeline for that page. This is the primary cos
 | Error signature | text matches "enable JavaScript", "Access Denied", a bare 4xx/5xx page |
 | Skipped source | a source is skipped twice running (missing Firecrawl key, repeated fetch failure) |
 
+The two failure shapes are treated differently, because section 4 requires a
+failed page to keep its stored snapshot. A fetch that raises, times out, or
+returns HTTP 400 or worse is a failure: nothing is stored, and the next weekly
+run retries it. A page that returns HTTP 200 carrying an "Access Denied" body
+or an empty JavaScript shell succeeded at the transport level, so its snapshot
+does advance, and the pre-gate health check is what catches it on that run and
+on every run afterwards.
+
 A per-source staleness figure is reported in the run report but does not alert. Scholarship pages legitimately go six to twelve months unchanged, so any configured cadence would either never fire or cry wolf, and there is no data to tune fourteen of them against.
 
 ### 3.2 `extract`
@@ -269,8 +277,15 @@ data/
   snapshots/<source_id>/<page_slug>.md   public sources only
   records.jsonl                          public records, sorted keys
   runs/<timestamp>.json                  run reports, public sources only
+  health.json                            consecutive-skip counters, public sources only
   private.age                            everything else; see section 5
 ```
+
+`health.json` holds the consecutive-skip counters the third health check in
+section 3.1 needs. They are cross-run state and the check cannot fire without
+them. Public sources only: a counter naming a private source would put an
+aggregate about private state in the committed tree, which section 5 forbids
+even for counts. Private counters join the bundle in P3.
 
 Before P3 builds the bundle, private snapshots and counters go to a gitignored
 `.private/` directory in the checkout root. The destination is chosen in one
