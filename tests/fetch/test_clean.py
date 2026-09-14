@@ -50,3 +50,41 @@ def test_cleaning_empty_or_unparseable_html_returns_empty_string():
     """
     assert clean("", keep_links=False) == ""
     assert clean("<html><body><div id='app'></div></body></html>", keep_links=False) == ""
+
+
+def _link_index(entries: int, *, wrapped: bool) -> str:
+    items = "".join(
+        f'<li><a href="https://x.test/p{i}">Programme {i} Scholarship</a></li>'
+        for i in range(entries)
+    )
+    body = f"<h1>Scholarships</h1><ul>{items}</ul>"
+    return (
+        f"<html><body><main>{body}</main></body></html>"
+        if wrapped
+        else f"<html><body>{body}</body></html>"
+    )
+
+
+def test_a_flat_link_index_loses_its_targets_but_keeps_its_text():
+    """The measured limit SPEC 3.1 records, pinned so the prose cannot drift.
+
+    The paragraph in SPEC 3.1 was wrong for a year of nobody testing it: it
+    claimed a bare index "survives cleaning as nothing at all" and that
+    surrounding prose was the enabling condition. Both are false. The text
+    survives without its hrefs, and the deciding factors are the content region
+    and the size of the list.
+    """
+    markdown = clean(_link_index(20, wrapped=False), keep_links=True)
+    assert markdown, "the link text survives; it is the targets that are lost"
+    assert "](" not in markdown, "a flat index keeps no hyperlink targets"
+    assert "Programme 0 Scholarship" in markdown
+
+
+def test_a_link_index_inside_a_content_region_keeps_its_targets_when_long_enough():
+    assert "](" in clean(_link_index(20, wrapped=True), keep_links=True)
+
+
+def test_a_short_link_index_loses_its_targets_even_inside_a_content_region():
+    """Size matters independently of the wrapper, which is why prose is not the
+    condition SPEC 3.1 used to name."""
+    assert "](" not in clean(_link_index(3, wrapped=True), keep_links=True)
