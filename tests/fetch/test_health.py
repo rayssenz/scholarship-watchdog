@@ -211,3 +211,23 @@ def test_a_corrupt_health_file_does_not_stop_the_run(tmp_path):
     (tmp_path / "data" / "health.json").write_text("{not json")
     ledger = SkipLedger.load(tmp_path)
     assert ledger.record(FIRECRAWL, _result(FIRECRAWL, "content")) is None
+
+
+def test_a_waf_bot_block_served_as_http_200_trips_the_error_signature():
+    """Measured live on 2026-09-14, docs/p1-acceptance.md.
+
+    nusgs.nus.edu.sg answered a plain fetch with HTTP 200 and this as the whole
+    body. It is an error page by any reading, and none of the original patterns
+    matched it, so a discover source blocked this way would have passed
+    silently. That is the outcome SPEC 3.1's health checks exist to prevent.
+    """
+    bodies = [
+        "Request unsuccessful. Incapsula incident ID: 1779000770254816462-391498350889997179",
+        "Attention Required! | Cloudflare",
+        "Checking your browser before accessing example.org",
+        "Please verify you are a human before continuing",
+        "Pardon Our Interruption. You are browsing in a way we did not expect.",
+    ]
+    for body in bodies:
+        alerts = check_page(WATCH, _result(WATCH, body), _no_previous())
+        assert [a.check for a in alerts] == ["error_signature"], body

@@ -315,4 +315,44 @@ Findings raised by this run, none of them fixed here:
 5. `knight-hennessy-deadlines` is declared `firecrawl` and is measurably static
    again, so the registry buys a rendered page it does not need.
 
-Findings 1 and 2 are the two that would let a real breakage go unnoticed.
+Findings 1 and 2 are the two that would let a real breakage go unnoticed, and
+both were fixed before P1 closed. Findings 3, 4 and 5 are registry and heuristic
+questions carried forward.
+
+### Findings 1 and 2, after the fix
+
+`ERROR_SIGNATURES` now covers bot walls, and `PageOutcome` carries a `broken`
+flag that is kept deliberately separate from `changed`. Re-running the same live
+probe, this time registered as a `discover` source, which is the case that used
+to pass silently:
+
+```
+$ scholarship-watchdog --repo-root /tmp/p1-probe2 fetch     # run 1
+ALERT nus-research-scholarship: error_signature - empty content after cleaning: the page returned no readable text, which is what a JavaScript-only shell looks like
+nus-research-scholarship         discover  changed
+
+$ scholarship-watchdog --repo-root /tmp/p1-probe2 fetch     # run 2
+ALERT nus-research-scholarship: error_signature - empty content after cleaning: the page returned no readable text, which is what a JavaScript-only shell looks like
+nus-research-scholarship         discover  unchanged
+
+$ # the committed row for that page
+{'id': 'nus-research-scholarship', 'role': 'discover', 'status': 'ok',
+ 'changed': False, 'broken': True, 'chars': 0}
+```
+
+The alert fires on both runs and the row is marked broken. Note the wall serves
+a different body per request: this run cleaned to nothing and tripped the
+empty-extraction branch, where the earlier run served the Incapsula text and
+tripped the new pattern. Both paths now alert.
+
+Why `broken` is a separate field rather than forcing `changed` to false: the
+first attempt at this fix did suppress `changed`, and that quietly broke
+`test_a_stored_error_page_alerts_on_the_second_run_through_fetch_all`. That test
+proves the health check runs ahead of the skip gate by asserting run two sees no
+change and alerts anyway. Suppressing `changed` would have made its precondition
+trivially true and retired the hardest guard in this stage. The hash stays a
+truthful statement about the bytes; `broken` carries the judgement.
+
+Both fixes were verified by removing them and watching the covering tests fail:
+deleting the Incapsula patterns failed two tests, hardwiring `broken=False`
+failed two others, and restoring each returned the suite to 142 passing.

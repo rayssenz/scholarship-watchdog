@@ -42,6 +42,15 @@ class PageOutcome:
     result: FetchResult
     change: Change | None
     advanced: bool
+    broken: bool = False
+    """The health check called this page an error, whatever its hash says.
+
+    Kept separate from `change.changed` because the two answer different
+    questions and a bot wall answers them oppositely: an Imperva block carries a
+    fresh incident ID on every request, so it is changed every run and is never
+    new content. Downstream stages read this, not the hash, when deciding
+    whether a page is worth extracting or notifying on. SPEC.md section 3.1.
+    """
 
 
 @dataclass
@@ -84,7 +93,8 @@ def fetch_all(
             run.alerts.append(skip_alert)
 
         previous = read_previous(source, source.url, repo_root=repo_root)
-        run.alerts.extend(check_page(source, result, previous))
+        page_alerts = check_page(source, result, previous)
+        run.alerts.extend(page_alerts)
 
         if not result.is_ok or result.markdown is None:
             run.pages.append(PageOutcome(source, result, None, advanced=False))
@@ -94,7 +104,22 @@ def fetch_all(
         if change.changed:
             advance(source, source.url, result.markdown, repo_root=repo_root)
 
-        run.pages.append(PageOutcome(source, result, change, advanced=change.changed))
+        # `changed` stays a truthful statement about the hash. `broken` is the
+        # separate question of whether the bytes are a page at all, and the two
+        # must not be collapsed: a bot wall regenerates an incident ID on every
+        # request, so it is genuinely changed every run and equally genuinely
+        # not new content. Suppressing `changed` here would also make the
+        # ordering guard's "run two sees no change" precondition trivially
+        # true, which would quietly retire the hardest test in this stage.
+        run.pages.append(
+            PageOutcome(
+                source,
+                result,
+                change,
+                advanced=change.changed,
+                broken=any(a.check == "error_signature" for a in page_alerts),
+            )
+        )
 
     ledger.save()
     return run
@@ -137,6 +162,7 @@ def build_run_report(
                 "fetcher": p.source.fetcher,
                 "status": p.result.status,
                 "changed": bool(p.change and p.change.changed),
+                "broken": p.broken,
                 "chars": len(p.result.markdown or ""),
                 "days_since_change": _days_since_change(p, finished_at, repo_root),
                 "reason": p.result.reason,

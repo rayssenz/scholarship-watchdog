@@ -112,8 +112,12 @@ An unchanged page terminates the pipeline for that page. This is the primary cos
 | Check | Alerts when |
 | --- | --- |
 | Content collapse | cleaned markdown is under 40% of the previous snapshot |
-| Error signature | text matches "enable JavaScript", "Access Denied", a bare 4xx/5xx page |
+| Error signature | text matches "enable JavaScript", "Access Denied", a bare 4xx/5xx page, or a bot wall |
 | Skipped source | a source is skipped twice running (missing Firecrawl key, repeated fetch failure) |
+
+Bot walls belong in that list because they are the common case for a university portal and they are all served with HTTP 200. The P1 acceptance run measured one getting past every other pattern: an Imperva block whose entire body was `Request unsuccessful. Incapsula incident ID: ...`. A `watch` source caught it only because the deadline check fired; a `discover` source blocked the same way would have passed silently.
+
+**A page the error-signature check rejects is marked broken, and broken is not the same question as changed.** A bot wall regenerates its incident ID on every request, so its hash never settles: it is genuinely changed every run and is equally genuinely not new content. Reporting it as changed would put a permanently broken page into the digest every week. Collapsing the two the other way, by forcing such a page to report unchanged, is worse: it would make the second-run precondition that proves the health check runs ahead of the skip gate trivially true, retiring the guard this section exists to establish. So the hash stays a truthful statement about the bytes, `broken` carries the judgement, and later stages read `broken` when deciding whether a page is worth extracting or notifying on.
 
 The two failure shapes are treated differently, because section 4 requires a
 failed page to keep its stored snapshot. A fetch that raises, times out, or
