@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from ..models import Source
-from .base import FetchResult
+from .base import MAX_RESPONSE_BYTES, FetchResult, ResponseTooLargeError, read_capped
 from .canonical import canonicalise_markdown_links
 from .clean import clean
 
@@ -36,31 +36,28 @@ class HttpxFetcher:
         client: httpx.Client | None = None,
         *,
         max_attempts: int = 3,
+        max_bytes: int = MAX_RESPONSE_BYTES,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._client = client or httpx.Client(
             timeout=TIMEOUT, follow_redirects=True, headers={"User-Agent": USER_AGENT}
         )
         self._max_attempts = max_attempts
+        self._max_bytes = max_bytes
         self._sleep = sleep
         self._last_request_at: dict[str, float] = {}
 
     def fetch(self, source: Source, page_url: str) -> FetchResult:
         self._wait_for_host(page_url, source.rate_limit_seconds)
-        response, failure = self._get_with_retries(page_url)
+        status, text, failure = self._get_with_retries(page_url)
 
-        if response is None:
+        if status is None:
             return self._failed(source, page_url, reason=failure)
 
-        if response.status_code >= 400:
-            return self._failed(
-                source,
-                page_url,
-                reason=f"HTTP {response.status_code}",
-                http_status=response.status_code,
-            )
+        if status >= 400 or text is None:
+            return self._failed(source, page_url, reason=failure, http_status=status)
 
-        markdown = clean(response.text, keep_links=source.is_discover)
+        markdown = clean(text, keep_links=source.is_discover)
         if source.is_discover and markdown:
             markdown = canonicalise_markdown_links(markdown, base=page_url)
 
@@ -70,33 +67,51 @@ class HttpxFetcher:
             markdown=markdown,
             status="ok",
             fetched_at=datetime.now(UTC),
-            http_status=response.status_code,
+            http_status=status,
         )
 
-    def _get_with_retries(self, page_url: str) -> tuple[httpx.Response | None, str | None]:
+    def _get_with_retries(self, page_url: str) -> tuple[int | None, str | None, str | None]:
         """Retry only what a retry can fix: transient status codes and timeouts.
 
         A 404 will not become a 200 on the third attempt, so retrying it only
         spends the run's time budget and hammers someone else's server.
+
+        The body is streamed rather than fetched whole, because the byte budget
+        has to be enforced while reading. A non-streaming get() has already
+        buffered the entire response by the time any check could run, which is
+        exactly the failure the budget exists to prevent, so the body is read
+        inside the stream context and this returns text rather than a response.
         """
         failure: str | None = None
+        headers = {"User-Agent": USER_AGENT}
+
         for attempt in range(1, self._max_attempts + 1):
             try:
-                headers = {"User-Agent": USER_AGENT}
-                response = self._client.get(page_url, headers=headers, follow_redirects=True)
+                with self._client.stream(
+                    "GET", page_url, headers=headers, follow_redirects=True
+                ) as response:
+                    if response.status_code not in RETRY_STATUS:
+                        if response.status_code >= 400:
+                            return response.status_code, None, f"HTTP {response.status_code}"
+                        try:
+                            return (
+                                response.status_code,
+                                read_capped(response, self._max_bytes),
+                                None,
+                            )
+                        except ResponseTooLargeError as exc:
+                            return response.status_code, None, str(exc)
+
+                    failure = f"HTTP {response.status_code}"
+                    if attempt == self._max_attempts:
+                        return response.status_code, None, failure
             except httpx.HTTPError as exc:
                 failure = type(exc).__name__
-            else:
-                if response.status_code not in RETRY_STATUS:
-                    return response, None
-                failure = f"HTTP {response.status_code}"
-                if attempt == self._max_attempts:
-                    return response, failure
 
             if attempt < self._max_attempts:
                 self._sleep(float(2 ** (attempt - 1)))
 
-        return None, failure
+        return None, None, failure
 
     def _wait_for_host(self, page_url: str, rate_limit_seconds: float) -> None:
         host = urlsplit(page_url).netloc

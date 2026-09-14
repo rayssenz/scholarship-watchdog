@@ -107,3 +107,65 @@ def test_an_unsuccessful_payload_is_failed_not_ok():
     result = fetcher.fetch(NUS, NUS.url)
     assert result.status == "failed"
     assert "render timeout" in result.reason
+
+
+def test_the_endpoint_targets_the_documented_api_version():
+    """Verified live on 2026-09-14 against docs.firecrawl.dev.
+
+    v1 and v2 both still answer and take the same request and response shapes,
+    but the v1 reference now redirects to the v2 introduction, so v1 is
+    undocumented and on an unannounced retirement path. This runs unattended
+    for months at a time, so it targets the version that is documented.
+    """
+    assert FIRECRAWL_ENDPOINT == "https://api.firecrawl.dev/v2/scrape"
+
+
+def test_a_200_carrying_html_is_failed_not_an_exception():
+    """A captive portal or proxy interstitial answers 200 with HTML.
+
+    An unguarded response.json() raises JSONDecodeError out of the fetcher, and
+    nothing between here and the CLI catches it, so one bad response would end
+    the whole weekly run before the skip ledger or the report were written.
+    """
+    fetcher, _ = _fetcher(lambda request: httpx.Response(200, text="<html>Access Denied</html>"))
+    result = fetcher.fetch(NUS, NUS.url)
+    assert result.status == "failed"
+    assert result.markdown is None
+
+
+def test_a_200_with_an_empty_body_is_failed():
+    fetcher, _ = _fetcher(lambda request: httpx.Response(200, text=""))
+    assert fetcher.fetch(NUS, NUS.url).status == "failed"
+
+
+def test_a_200_whose_json_is_not_an_object_is_failed():
+    """`payload.get` on a list raises AttributeError, same blast radius."""
+    fetcher, _ = _fetcher(lambda request: httpx.Response(200, json=[1, 2, 3]))
+    assert fetcher.fetch(NUS, NUS.url).status == "failed"
+
+
+def test_a_successful_payload_carrying_no_markdown_is_failed():
+    """SPEC 3.1: a page that stores an empty snapshot looks unchanged forever.
+
+    `{"success": true, "data": null}` previously returned ok with empty
+    markdown, which advances an empty snapshot. The content-collapse check
+    fires once on that run and never again, because the empty snapshot becomes
+    the baseline it compares against.
+    """
+    for payload in ({"success": True, "data": None}, {"success": True, "data": {"markdown": ""}}):
+        fetcher, _ = _fetcher(lambda request, p=payload: httpx.Response(200, json=p))
+        result = fetcher.fetch(NUS, NUS.url)
+        assert result.status == "failed", payload
+        assert result.markdown is None, payload
+
+
+def test_an_oversized_firecrawl_response_is_failed():
+    """Same budget as the httpx fetcher, and for the same runner.
+
+    A proxy or captive portal in front of the API answers with whatever it
+    likes, so "it is a paid API" is not a memory bound.
+    """
+    fetcher, _ = _fetcher(lambda request: httpx.Response(200, content=b"x" * 5000), max_bytes=1000)
+    result = fetcher.fetch(NUS, NUS.url)
+    assert result.status == "failed"
+    assert "too large" in result.reason

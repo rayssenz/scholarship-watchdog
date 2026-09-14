@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import ClassVar, Literal, Protocol
 
+import httpx
+
 from ..models import Source
 
 FetchStatus = Literal["ok", "skipped", "failed"]
@@ -51,3 +53,34 @@ class Fetcher(Protocol):
     name: ClassVar[str]
 
     def fetch(self, source: Source, page_url: str) -> FetchResult: ...
+
+
+MAX_RESPONSE_BYTES = 10 * 1024 * 1024
+
+
+class ResponseTooLargeError(Exception):
+    """A response body exceeded the byte budget and was abandoned part-read."""
+
+
+def read_capped(response: httpx.Response, max_bytes: int) -> str:
+    """Read a streaming response into text, abandoning it past `max_bytes`.
+
+    SPEC 4 puts this on an unattended Actions runner with finite memory and no
+    swap, so an unbounded read is an OOM kill: the job reports no diagnostics,
+    writes no run report, and leaves the skip ledger unwritten, which is a
+    silent failure rather than a loud one.
+
+    `Content-Length` is not the enforcement. It is optional, absent under
+    chunked transfer encoding, and set by the same server the budget exists to
+    defend against, so the count is taken over the bytes actually read.
+
+    Decoding is explicit rather than left to charset detection, because the
+    decoded text is what gets hashed for change detection and a detector that
+    guesses differently between two runs would report a change that is not one.
+    """
+    body = bytearray()
+    for chunk in response.iter_bytes():
+        body += chunk
+        if len(body) > max_bytes:
+            raise ResponseTooLargeError(f"response too large (over {max_bytes} bytes)")
+    return bytes(body).decode(response.charset_encoding or "utf-8", errors="replace")
