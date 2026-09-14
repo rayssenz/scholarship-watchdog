@@ -160,7 +160,7 @@ def test_a_stored_error_page_alerts_on_the_second_run_through_fetch_all(tmp_path
     )
 
 
-class ErrorPage:
+class AccessDeniedPage:
     name = "httpx"
 
     def fetch(self, source, page_url):
@@ -187,7 +187,7 @@ def test_the_printed_summary_omits_private_sources_entirely(tmp_path):
     from scholarship_watchdog.cli import render_alerts, render_summary
 
     run = fetch_all(
-        [PUBLIC_WATCH, PRIVATE_WATCH], fetchers={"httpx": ErrorPage()}, repo_root=tmp_path
+        [PUBLIC_WATCH, PRIVATE_WATCH], fetchers={"httpx": AccessDeniedPage()}, repo_root=tmp_path
     )
     summary = render_summary(run)
     printed = "\n".join(summary + render_alerts(run))
@@ -209,7 +209,7 @@ def test_the_printed_output_is_identical_with_and_without_private_sources(tmp_pa
 
     def printed(sources):
         run = fetch_all(
-            sources, fetchers={"httpx": ErrorPage()}, repo_root=tmp_path / str(len(sources))
+            sources, fetchers={"httpx": AccessDeniedPage()}, repo_root=tmp_path / str(len(sources))
         )
         return "\n".join(render_summary(run) + render_alerts(run))
 
@@ -223,3 +223,31 @@ def test_a_source_whose_fetcher_is_unavailable_is_skipped_not_crashed(tmp_path):
     )
     run = fetch_all([firecrawl_source], fetchers={"httpx": RecordingFetcher()}, repo_root=tmp_path)
     assert run.pages[0].result.status == "skipped"
+
+
+def test_a_malformed_private_config_exits_cleanly_without_a_traceback(tmp_path, capsys):
+    """SPEC 5: from P3 this stderr is a public Actions log.
+
+    The end-to-end guard behind the loader's own. Exit 2, one line, and no
+    fragment of the gitignored file anywhere in the output.
+    """
+    from scholarship_watchdog.cli import main
+
+    config = tmp_path / "config"
+    config.mkdir()
+    (config / "sources.yaml").write_text(
+        "sources:\n  - id: daad\n    name: DAAD\n    role: watch\n    url: https://a.example/d\n"
+    )
+    (config / "sources.local.yaml").write_text(
+        "sources:\n  - id: ambassade-de-tunisie-berlin\n    name: Embassy\n"
+        '    url: "https://tn-embassy.example/bourses\n    role: watch\n'
+    )
+
+    code = main(["--repo-root", str(tmp_path), "fetch"])
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert "Traceback" not in captured.err
+    assert "tn-embassy" not in captured.err
+    assert "ambassade-de-tunisie-berlin" not in captured.err
+    assert "sources.local.yaml" in captured.err
