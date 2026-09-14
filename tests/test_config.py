@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from scholarship_watchdog.config import (
+    ConfigError,
     DuplicateSourceIdError,
     load_profile,
     load_sources,
@@ -156,3 +157,105 @@ def test_the_committed_public_registry_loads(tmp_path):
     assert len(sources) == 13
     assert sum(1 for s in sources if s.is_watch) == 4
     assert all(s.private is False for s in sources)
+
+
+def test_a_malformed_private_file_raises_without_quoting_its_contents(tmp_path):
+    """SPEC 5: a traceback is a public Actions log from P3.
+
+    PyYAML's MarkedYAMLError embeds the offending line verbatim, so letting it
+    escape publishes a line of the user's private registry. The id, the URL and
+    the quoting that broke the parse must all be absent from what is raised.
+    """
+    _write(tmp_path, "sources.yaml", PUBLIC)
+    _write(
+        tmp_path,
+        "sources.local.yaml",
+        "sources:\n  - id: mext-local-embassy\n    name: Embassy\n"
+        '    url: "https://REPLACE-ME.embassy.example/scholarship\n    role: watch\n',
+    )
+    with pytest.raises(ConfigError) as caught:
+        load_sources(tmp_path)
+
+    rendered = f"{caught.value}{caught.value.__cause__ or ''}"
+    assert "REPLACE-ME" not in rendered
+    assert "mext-local-embassy" not in rendered
+    assert "sources.local.yaml" in rendered, "naming the file is safe and useful"
+
+
+def test_a_duplicate_id_between_two_private_files_withholds_the_id(tmp_path):
+    """An id that appears only in private files is itself private.
+
+    The public-first case still reports the id, because a public id is public.
+    """
+    _write(tmp_path, "sources.yaml", PUBLIC)
+    private_entry = (
+        "sources:\n  - id: fulbright-xx-commission\n    name: Commission\n"
+        "    role: watch\n    url: https://example.org/c\n"
+    )
+    _write(tmp_path, "sources.local.yaml", private_entry)
+    _write(tmp_path, "watched.local.yaml", private_entry)
+
+    with pytest.raises(DuplicateSourceIdError) as caught:
+        load_sources(tmp_path)
+
+    assert "fulbright-xx-commission" not in str(caught.value)
+    assert "sources.local.yaml" in str(caught.value)
+    assert "watched.local.yaml" in str(caught.value)
+
+
+def test_an_invalid_private_entry_reports_no_field_names_or_values(tmp_path):
+    """safe_errors strips the rejected value; loc still names the field.
+
+    A typo'd key in a private file names something about the private registry,
+    so the private branch reports a count and nothing else.
+    """
+    _write(tmp_path, "sources.yaml", PUBLIC)
+    _write(
+        tmp_path,
+        "sources.local.yaml",
+        "sources:\n  - id: c\n    name: C\n    role: watch\n"
+        "    url: https://example.org/c\n    citizenship_hint: QQ\n",
+    )
+    with pytest.raises(ConfigError) as caught:
+        load_sources(tmp_path)
+
+    rendered = f"{caught.value}{caught.value.__cause__ or ''}"
+    assert "citizenship_hint" not in rendered
+    assert "QQ" not in rendered
+
+
+def test_an_invalid_public_entry_still_reports_which_field_failed(tmp_path):
+    """The public registry is public, so its detail stays debuggable."""
+    _write(
+        tmp_path,
+        "sources.yaml",
+        "sources:\n  - id: x\n    name: X\n    role: watch\n"
+        "    url: https://example.org/x\n    fetchr: firecrawl\n",
+    )
+    with pytest.raises(ConfigError, match="fetchr"):
+        load_sources(tmp_path)
+
+
+def test_an_invalid_profile_reports_no_field_names_or_values(tmp_path):
+    """profile.yaml is the most sensitive file in the project.
+
+    A citizenship code reaching a traceback is the one unrecoverable mistake
+    SPEC 5 names, so neither the rejected value nor the field name escapes.
+    """
+    _write(tmp_path, "profile.yaml", "citizenship: QQ\nresidency: ZZ\nbogus_field: yes\n")
+    with pytest.raises(ConfigError) as caught:
+        load_profile(tmp_path)
+
+    rendered = f"{caught.value}{caught.value.__cause__ or ''}"
+    assert "QQ" not in rendered
+    assert "bogus_field" not in rendered
+
+
+def test_a_malformed_profile_does_not_quote_its_contents(tmp_path):
+    _write(tmp_path, "profile.yaml", 'citizenship: "QQ\nresidency: ZZ\n')
+    with pytest.raises(ConfigError) as caught:
+        load_profile(tmp_path)
+
+    rendered = f"{caught.value}{caught.value.__cause__ or ''}"
+    assert "QQ" not in rendered
+    assert "citizenship" not in rendered

@@ -14,7 +14,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .config import load_sources
+from .config import ConfigError, DuplicateSourceIdError, load_sources
 from .fetch import FetchRun, build_run_report, fetch_all
 from .fetch.firecrawl_fetcher import FirecrawlFetcher
 from .fetch.httpx_fetcher import HttpxFetcher
@@ -83,7 +83,13 @@ def _build_fetchers() -> dict[str, object]:
 
 def _fetch(args: argparse.Namespace) -> int:
     repo_root = Path(args.repo_root).resolve()
-    sources = load_sources(repo_root / "config")
+    try:
+        sources = load_sources(repo_root / "config")
+    except (ConfigError, DuplicateSourceIdError) as exc:
+        # Both are built to be safe to print; nothing else from the loader is.
+        # See config.ConfigError for why the exception chain is suppressed.
+        print(f"config: {exc}", file=sys.stderr)
+        return 2
     if args.only:
         sources = [s for s in sources if s.id in set(args.only)]
         if not sources:
