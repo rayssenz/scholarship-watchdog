@@ -54,6 +54,18 @@ ERROR_SIGNATURES: tuple[re.Pattern[str], ...] = (
     re.compile(r"\b(500|502|503) (internal server error|bad gateway|service unavailable)\b", re.I),
     re.compile(r"you do not have permission", re.I),
     re.compile(r"request blocked", re.I),
+    # Bot walls, which are the common case for a university portal and are all
+    # served with HTTP 200. Added after the P1 acceptance run measured an
+    # Imperva block getting through every pattern above it: see
+    # docs/p1-acceptance.md. Each is matched on a phrase the vendor's own
+    # interstitial prints, not on a generic word, because a false positive here
+    # now also suppresses the change flag.
+    re.compile(r"incapsula incident", re.I),
+    re.compile(r"request unsuccessful", re.I),
+    re.compile(r"attention required.{0,3}\| cloudflare", re.I),
+    re.compile(r"checking your browser before accessing", re.I),
+    re.compile(r"verify you are a human", re.I),
+    re.compile(r"pardon our interruption", re.I),
 )
 
 

@@ -251,3 +251,99 @@ def test_a_malformed_private_config_exits_cleanly_without_a_traceback(tmp_path, 
     assert "REPLACE-ME" not in captured.err
     assert "mext-local-embassy" not in captured.err
     assert "sources.local.yaml" in captured.err
+
+
+def test_an_error_page_with_a_rotating_token_is_not_reported_as_a_change(tmp_path):
+    """Measured live on 2026-09-14, docs/p1-acceptance.md.
+
+    An Imperva block regenerates its incident ID on every request, so the
+    cleaned markdown differs every run and the hash never settles. The alert is
+    correct and fires every run by SPEC 3.1's design. Calling it a content
+    change is not: under the P3 cron it would extract and notify every week
+    about a page that is permanently broken.
+
+    An error page is not a content change. The snapshot still advances, because
+    SPEC 3.1 says a 200 succeeded at the transport level, but nothing
+    downstream should act on it.
+    """
+
+    class RotatingBlock:
+        name = "httpx"
+
+        def __init__(self):
+            self.n = 0
+
+        def fetch(self, source, page_url):
+            self.n += 1
+            return FetchResult(
+                source_id=source.id,
+                page_url=page_url,
+                markdown=f"Request unsuccessful. Incapsula incident ID: 99900{self.n}-4477{self.n}",
+                status="ok",
+                fetched_at=datetime.now(UTC),
+                http_status=200,
+            )
+
+    fetcher = RotatingBlock()
+    for run_number in (1, 2, 3):
+        run = fetch_all([PUBLIC_WATCH], fetchers={"httpx": fetcher}, repo_root=tmp_path)
+        assert any(a.check == "error_signature" for a in run.alerts), (
+            f"run {run_number}: the block must alert every run"
+        )
+        assert run.pages[0].broken is True, (
+            f"run {run_number}: the page must be marked broken, not treated as new content"
+        )
+        assert run.pages[0].change.changed is True, (
+            f"run {run_number}: the hash genuinely differs; `changed` must stay truthful "
+            "so the ordering guard's precondition keeps its meaning"
+        )
+
+
+def test_a_real_content_change_is_still_reported_as_changed(tmp_path):
+    """The other side of the guard above: suppressing error pages must not
+    suppress genuine edits."""
+
+    class Editing:
+        name = "httpx"
+
+        def __init__(self):
+            self.n = 0
+
+        def fetch(self, source, page_url):
+            self.n += 1
+            return FetchResult(
+                source_id=source.id,
+                page_url=page_url,
+                markdown=f"Application deadline: {self.n} October 2027. Apply through the portal.",
+                status="ok",
+                fetched_at=datetime.now(UTC),
+                http_status=200,
+            )
+
+    fetcher = Editing()
+    first = fetch_all([PUBLIC_WATCH], fetchers={"httpx": fetcher}, repo_root=tmp_path)
+    second = fetch_all([PUBLIC_WATCH], fetchers={"httpx": fetcher}, repo_root=tmp_path)
+    assert first.pages[0].change.changed is True
+    assert second.pages[0].change.changed is True, "a genuine edit is still a change"
+    assert first.pages[0].broken is False
+    assert second.pages[0].broken is False, "a good page is never marked broken"
+
+
+def test_the_run_report_marks_a_broken_page(tmp_path):
+    """SPEC 3.1: the report distinguishes a changed page from a broken one."""
+    run = fetch_all([PUBLIC_WATCH], fetchers={"httpx": AccessDeniedPage()}, repo_root=tmp_path)
+    started = datetime.now(UTC)
+    row = build_run_report(run, started_at=started, finished_at=started, repo_root=tmp_path)[
+        "sources"
+    ][0]
+    assert row["broken"] is True
+    assert row["changed"] is True, "the hash statement stays truthful"
+
+
+def test_the_run_report_does_not_mark_a_healthy_page_broken(tmp_path):
+    run = fetch_all([PUBLIC_WATCH], fetchers={"httpx": RecordingFetcher()}, repo_root=tmp_path)
+    started = datetime.now(UTC)
+    row = build_run_report(run, started_at=started, finished_at=started, repo_root=tmp_path)[
+        "sources"
+    ][0]
+    assert row["broken"] is False
