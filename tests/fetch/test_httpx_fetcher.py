@@ -128,3 +128,65 @@ def test_rate_limiting_waits_between_requests_to_one_host():
     fetcher.fetch(WATCH, "https://example.org/one")
     fetcher.fetch(WATCH, "https://example.org/two")
     assert slept and slept[-1] == pytest.approx(WATCH.rate_limit_seconds, abs=0.5)
+
+
+def test_an_oversized_response_is_failed_rather_than_read_into_memory():
+    """SPEC 4: this runs unattended on a 7 GB Actions runner with no swap.
+
+    A hostile or merely broken source can answer with a body far larger than
+    any scholarship page. Reading it whole OOM-kills the job, which reports no
+    diagnostics, writes no run report and leaves the skip ledger unwritten.
+    """
+    body = b"x" * 5000
+
+    def handler(request):
+        return httpx.Response(200, content=body)
+
+    fetcher, _ = _fetcher(handler, max_bytes=1000)
+    result = fetcher.fetch(WATCH, WATCH.url)
+    assert result.status == "failed"
+    assert result.markdown is None
+    assert "too large" in result.reason
+
+
+def test_a_lying_content_length_does_not_defeat_the_cap():
+    """Content-Length is optional and attacker-controlled, so it is not the
+    enforcement. The budget is counted over the bytes actually read."""
+
+    def handler(request):
+        return httpx.Response(200, content=b"x" * 5000, headers={"Content-Length": "12"})
+
+    fetcher, _ = _fetcher(handler, max_bytes=1000)
+    assert fetcher.fetch(WATCH, WATCH.url).status == "failed"
+
+
+def test_a_body_inside_the_cap_is_still_fetched_normally():
+    html = (FIXTURES / "daad_watch_with_deadline.html").read_text()
+    fetcher, _ = _fetcher(lambda request: httpx.Response(200, html=html), max_bytes=10_000_000)
+    assert fetcher.fetch(WATCH, WATCH.url).status == "ok"
+
+
+def test_an_oversized_body_is_abandoned_rather_than_drained():
+    """The memory bound, as opposed to the label on it.
+
+    Classifying an oversize response as failed is worth nothing if the bytes
+    were already buffered before the count ran, which is what a non-streaming
+    get() does. This counts what the server was actually asked to produce: the
+    generator must stop being pulled shortly after the budget is passed, not
+    run to completion.
+    """
+    produced = []
+
+    def chunks():
+        for i in range(1000):
+            produced.append(i)
+            yield b"x" * 1000
+
+    def handler(request):
+        return httpx.Response(200, content=chunks())
+
+    fetcher, _ = _fetcher(handler, max_bytes=5000)
+    result = fetcher.fetch(WATCH, WATCH.url)
+
+    assert result.status == "failed"
+    assert len(produced) < 20, f"drained {len(produced)} chunks of a 1000-chunk body"
