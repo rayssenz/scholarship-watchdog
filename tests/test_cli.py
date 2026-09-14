@@ -160,36 +160,60 @@ def test_a_stored_error_page_alerts_on_the_second_run_through_fetch_all(tmp_path
     )
 
 
-def test_the_printed_summary_withholds_private_source_ids(tmp_path):
+class ErrorPage:
+    name = "httpx"
+
+    def fetch(self, source, page_url):
+        return FetchResult(
+            source_id=source.id,
+            page_url=page_url,
+            markdown="Access Denied. You do not have permission.",
+            status="ok",
+            fetched_at=datetime.now(UTC),
+            http_status=200,
+        )
+
+
+def test_the_printed_summary_omits_private_sources_entirely(tmp_path):
     """SPEC 5, applied to stdout.
 
-    From P3 this output is a GitHub Actions log on a public repository, so a
-    printed id names the user's commission and therefore their country. The
-    outcome is reported; the identity is not.
+    From P3 this output is a GitHub Actions log on a public repository.
+    Withholding the id is not enough: one line per private source publishes how
+    many exist, and therefore the week the auto-grown watch list gained one.
+    SPEC 5 settled that argument for GitHub Issues, where wording the body
+    carefully did not help because the existence of the entry was the signal.
+    The line count must depend on the public registry alone.
     """
     from scholarship_watchdog.cli import render_alerts, render_summary
-
-    class ErrorPage:
-        name = "httpx"
-
-        def fetch(self, source, page_url):
-            return FetchResult(
-                source_id=source.id,
-                page_url=page_url,
-                markdown="Access Denied. You do not have permission.",
-                status="ok",
-                fetched_at=datetime.now(UTC),
-                http_status=200,
-            )
 
     run = fetch_all(
         [PUBLIC_WATCH, PRIVATE_WATCH], fetchers={"httpx": ErrorPage()}, repo_root=tmp_path
     )
-    printed = "\n".join(render_summary(run) + render_alerts(run))
+    summary = render_summary(run)
+    printed = "\n".join(summary + render_alerts(run))
 
-    assert "local-commission" not in printed
-    assert "(private source)" in printed
+    assert len(summary) == 1, "one line per public source, and nothing per private source"
     assert "daad-study" in printed, "public ids are still reported"
+    assert "local-commission" not in printed
+    assert "(private source)" not in printed, "a redacted line still counts the private sources"
+
+
+def test_the_printed_output_is_identical_with_and_without_private_sources(tmp_path):
+    """The invariant behind the line count, stated so it cannot regress.
+
+    SPEC 5: anything shaped by the profile is private, including every artifact
+    produced by acting on it. Two runs differing only in their private registry
+    must be indistinguishable on stdout and stderr.
+    """
+    from scholarship_watchdog.cli import render_alerts, render_summary
+
+    def printed(sources):
+        run = fetch_all(
+            sources, fetchers={"httpx": ErrorPage()}, repo_root=tmp_path / str(len(sources))
+        )
+        return "\n".join(render_summary(run) + render_alerts(run))
+
+    assert printed([PUBLIC_WATCH]) == printed([PUBLIC_WATCH, PRIVATE_WATCH])
 
 
 def test_a_source_whose_fetcher_is_unavailable_is_skipped_not_crashed(tmp_path):

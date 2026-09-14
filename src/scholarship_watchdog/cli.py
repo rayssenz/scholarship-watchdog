@@ -20,41 +20,51 @@ from .fetch.firecrawl_fetcher import FirecrawlFetcher
 from .fetch.httpx_fetcher import HttpxFetcher
 from .paths import run_report_path
 
-REDACTED = "(private source)"
-
 
 def _private_ids(run: FetchRun) -> set[str]:
     return {p.source.id for p in run.pages if p.source.private}
 
 
 def render_summary(run: FetchRun) -> list[str]:
-    """One line per page, with private ids withheld.
+    """One line per public page. Private sources are omitted entirely.
 
     Stdout is a public artifact from P3 onward: the Actions log of a public
-    repository is readable by anyone. A private source's id names the user's
-    embassy or national commission, and the id alone names their country, so
-    the line reports the outcome without the identity. SPEC.md section 5.
+    repository is readable by anyone. Withholding the id is not enough, because
+    the line itself is the signal. One line per private source publishes how
+    many private sources exist, and a reader comparing two weekly runs learns
+    the week the auto-grown watch list gained an entry, plus each private page's
+    role and whether it changed. SPEC.md section 5 settled this argument once
+    already, for the GitHub Issues notifier: wording the body carefully does not
+    help when the existence of the entry is the signal.
+
+    The private side reports through the email digest in P3, which is the
+    channel SPEC.md section 5 designates for it.
     """
     lines = []
     for outcome in run.pages:
+        if outcome.source.private:
+            continue
         state = outcome.result.status
         if outcome.change is not None:
             state = "changed" if outcome.change.changed else "unchanged"
-        label = REDACTED if outcome.source.private else outcome.source.id
-        lines.append(f"{label:<32} {outcome.source.role:<9} {state}")
+        lines.append(f"{outcome.source.id:<32} {outcome.source.role:<9} {state}")
     return lines
 
 
 def render_alerts(run: FetchRun) -> list[str]:
-    """Alert lines, with private ids withheld for the same reason.
+    """Alert lines for public sources only, for the same reason.
 
-    The alert's detail text is written by this project and names no source, so
-    it is safe to print; only the id needs withholding.
+    The detail text is written by this project, but it is not content-free: a
+    content_collapse detail carries character counts of the page it fired on,
+    and an error_signature detail names the pattern a private page matched. A
+    redacted id in front of that still reports that some private page broke this
+    week, which is itself profile-shaped.
     """
     private = _private_ids(run)
     return [
-        f"ALERT {REDACTED if a.source_id in private else a.source_id}: {a.check} - {a.detail}"
+        f"ALERT {a.source_id}: {a.check} - {a.detail}"
         for a in run.alerts
+        if a.source_id not in private
     ]
 
 
