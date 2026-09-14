@@ -1,6 +1,6 @@
 """Probe every registered source and report what it actually yields.
 
-Requires pyyaml. Until the project has a pyproject.toml: pip install pyyaml
+Requires the package installed: pip install -e ".[dev]"
 
 Answers two questions the registry depends on:
 
@@ -27,18 +27,12 @@ from pathlib import Path
 
 import yaml
 
+from scholarship_watchdog.deadlines import find_dates, find_deadline_keywords, has_deadline
+
 REGISTRY = Path(__file__).resolve().parent.parent / "config" / "sources.yaml"
 UA = "scholarship-watchdog/0.1 (+https://github.com/rayssenz/scholarship-watchdog)"
 TIMEOUT = 25
 TEXT_FLOOR = 2000
-
-DATE = re.compile(
-    r"\b(\d{1,2}\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}"
-    r"|(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4}"
-    r"|\d{1,2}[./]\d{1,2}[./]\d{4}|\d{4}-\d{2}-\d{2})\b",
-    re.I,
-)
-DEADLINE = re.compile(r"\b(deadline|closing date|applications? close|apply by|due date)\b", re.I)
 
 
 def visible_text(html: str) -> str:
@@ -57,14 +51,14 @@ def probe(source: dict) -> dict:
     except Exception as exc:  # noqa: BLE001 - a probe reports failures, never raises
         return result | {"fetcher": "unreachable", "dates": 0, "note": type(exc).__name__}
 
-    dates = DATE.findall(text)
-    keywords = DEADLINE.findall(text)
+    dates = find_dates(text)
+    keywords = find_deadline_keywords(text)
     return result | {
         "fetcher": "httpx" if len(text) > TEXT_FLOOR else "firecrawl",
         "chars": len(text),
         "dates": len(dates),
         "keywords": len(keywords),
-        "has_deadline": bool(dates and keywords),
+        "has_deadline": has_deadline(text),
     }
 
 

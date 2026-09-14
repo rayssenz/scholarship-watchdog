@@ -93,6 +93,12 @@ Role replaces the earlier `expects_dates` flag, which was a patch over this miss
 
 **Discover-role cleaning preserves hyperlink targets.** Default trafilatura cleaning discards `href` attributes with the navigation, which would leave the extractor reading programme names as text with no link to follow. Hrefs are canonicalised before hashing, so a portal rotating tracking parameters does not register as changed.
 
+That guarantee has a measured limit, recorded here rather than discovered in production. A bare index of links loses its `href` attributes: the text of each link survives, the target does not. Measured against the registry on 2026-09-05: the NTU postgraduate page kept 16 links from 2203 characters, the Kyoto page kept 2 from 5173, and the JASSO index yielded 280 characters and no links.
+
+Two conditions decide whether targets survive, and neither is the amount of surrounding prose. Measured on trafilatura 1.12.2 on 2026-09-14, against synthetic pages varying one factor at a time. First, the extraction has to land in a region trafilatura treats as main content: a list inside a `<main>` element kept its targets, and the same list at the top level of `<body>` lost every one of them at sizes from three to forty entries. Second, the list has to be large enough: inside `<main>`, three entries still lost their targets where twenty kept them. Adding prose does not rescue a small list and can make matters worse, because at three entries the prose was retained and the link list was dropped entirely.
+
+The practical reading is that a portal whose links sit in a recognisable content region, among enough sibling entries, keeps them, and a sparse or structurally flat index does not. The `never yielded a candidate` flag in this section is what stops that being silent, and P2 owns the fix, because the fallback worth building is the one the extractor can be measured against on the golden set. Building it before there is an extractor would be guessing at the consumer's requirements.
+
 A bounded one-level crawl (`follow_links`) was specified in an earlier draft and is removed. Discovery plus promotion reaches the same leaf pages and verifies each one before adopting it, which the crawl did not. The condition for re-adding it is recorded in `docs/design/2026-08-29-source-model-design.md`: run reports showing discovery consistently fails to surface links on index pages.
 
 **Snapshots are keyed by `(source_id, page_url)`**, so each page hashes and advances independently.
@@ -106,8 +112,20 @@ An unchanged page terminates the pipeline for that page. This is the primary cos
 | Check | Alerts when |
 | --- | --- |
 | Content collapse | cleaned markdown is under 40% of the previous snapshot |
-| Error signature | text matches "enable JavaScript", "Access Denied", a bare 4xx/5xx page |
+| Error signature | text matches "enable JavaScript", "Access Denied", a bare 4xx/5xx page, or a bot wall |
 | Skipped source | a source is skipped twice running (missing Firecrawl key, repeated fetch failure) |
+
+Bot walls belong in that list because they are the common case for a university portal and they are all served with HTTP 200. The P1 acceptance run measured one getting past every other pattern: an Imperva block whose entire body was `Request unsuccessful. Incapsula incident ID: ...`. A `watch` source caught it only because the deadline check fired; a `discover` source blocked the same way would have passed silently.
+
+**A page the error-signature check rejects is marked broken, and broken is not the same question as changed.** A bot wall regenerates its incident ID on every request, so its hash never settles: it is genuinely changed every run and is equally genuinely not new content. Reporting it as changed would put a permanently broken page into the digest every week. Collapsing the two the other way, by forcing such a page to report unchanged, is worse: it would make the second-run precondition that proves the health check runs ahead of the skip gate trivially true, retiring the guard this section exists to establish. So the hash stays a truthful statement about the bytes, `broken` carries the judgement, and later stages read `broken` when deciding whether a page is worth extracting or notifying on.
+
+The two failure shapes are treated differently, because section 4 requires a
+failed page to keep its stored snapshot. A fetch that raises, times out, or
+returns HTTP 400 or worse is a failure: nothing is stored, and the next weekly
+run retries it. A page that returns HTTP 200 carrying an "Access Denied" body
+or an empty JavaScript shell succeeded at the transport level, so its snapshot
+does advance, and the pre-gate health check is what catches it on that run and
+on every run afterwards.
 
 A per-source staleness figure is reported in the run report but does not alert. Scholarship pages legitimately go six to twelve months unchanged, so any configured cadence would either never fire or cry wolf, and there is no data to tune fourteen of them against.
 
@@ -267,8 +285,21 @@ data/
   snapshots/<source_id>/<page_slug>.md   public sources only
   records.jsonl                          public records, sorted keys
   runs/<timestamp>.json                  run reports, public sources only
+  health.json                            consecutive-skip counters, public sources only
   private.age                            everything else; see section 5
 ```
+
+`health.json` holds the consecutive-skip counters the third health check in
+section 3.1 needs. They are cross-run state and the check cannot fire without
+them. Public sources only: a counter naming a private source would put an
+aggregate about private state in the committed tree, which section 5 forbids
+even for counts. Private counters join the bundle in P3.
+
+Before P3 builds the bundle, private snapshots and counters go to a gitignored
+`.private/` directory in the checkout root. The destination is chosen in one
+module rather than at each call site, because section 5 records this leak being
+rediscovered four times, and every rediscovery was a new output path applying
+the rule from memory.
 
 **Write protocol.** The run is a single pass, and the ordering is load-bearing at three points:
 
@@ -380,7 +411,7 @@ Each phase ends with a tagged, working state and a demonstrable artifact.
 
 An earlier split placed promotion in P2, while promotion writes the private bundle and reports through the digest, both of which are P3. Promotion could not have been built or tested end to end where it sat, so it moves to its own phase after the machinery it depends on exists.
 
-**P1, foundation (~3h).** Project scaffold: `pyproject.toml` pinning Python 3.12, ruff, pytest, CI on push, and the package layout `src/watchdog/{fetch,extract,score,store,notify}/` with tests in `tests/<stage>/`; Pydantic record schema and YAML config loading with a sanitized example profile; the fetch stage with roles, `(source_id, page_url)` snapshot storage, change detection, link-preserving cleaning for discover sources, and fetch-stage health checks.
+**P1, foundation (~3h).** Project scaffold: `pyproject.toml` pinning Python 3.12, ruff, pytest, CI on push, and the package layout `src/scholarship_watchdog/{fetch,extract,score,store,notify}/` with tests in `tests/<stage>/`; Pydantic record schema and YAML config loading with a sanitized example profile; the fetch stage with roles, `(source_id, page_url)` snapshot storage, change detection, link-preserving cleaning for discover sources, and fetch-stage health checks. The package is `scholarship_watchdog` rather than `watchdog`, which is taken on PyPI by a widely installed filesystem-monitoring library; shadowing it would make `import watchdog` resolve differently depending on what else is installed.
 *Acceptance:* a manual run fetches every registered page, writes snapshots, and produces usable JSON; a second run reports every page unchanged; a source serving an error page trips a health check rather than passing silently; the role-aware probe fails a `watch` source with no deadline and passes a `discover` source without one; tests and lint pass in CI.
 
 **P2, intelligence (~5h).** Extraction behind the `Extractor` protocol with structured output, including discover-mode extraction emitting `candidate_url`; the golden eval set with both watch and discover cases, its CI gate and the model benchmark it doubles as; deterministic scoring with the null policy, tier thresholds and profile-hash re-evaluation; the JSONL store with dual hashing.
