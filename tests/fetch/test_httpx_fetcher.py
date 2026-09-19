@@ -213,3 +213,69 @@ def test_no_cookie_set_while_fetching_one_source_reaches_the_next():
     fetcher.fetch(private, private.url)
     fetcher.fetch(public, public.url)
     assert seen == [("/private", None), ("/public", None)]
+
+
+def _portal(links):
+    """A discover page trafilatura keeps links for: a <main> region and enough
+    entries (SPEC 3.1's measured limit)."""
+    items = "".join(
+        f'<li><a href="{h}">Programme {i} Scholarship</a></li>' for i, h in enumerate(links)
+    )
+    return f"<html><body><main><h1>Scholarships</h1><ul>{items}</ul></main></body></html>"
+
+
+def test_a_redirect_body_is_abandoned_rather_than_drained():
+    """Found by the cross-model review. httpx reads each intermediate redirect's
+    body in full before yielding the final response, so the byte cap never saw
+    it: a 302 streaming a large body was drained completely and the fetch
+    returned ok. The drain test only ever exercised a final 200."""
+    pulled = []
+
+    def big():
+        for i in range(1000):
+            pulled.append(i)
+            yield b"x" * 1000
+
+    def handler(request):
+        if request.url.path == "/start":
+            return httpx.Response(302, headers={"Location": "/end"}, content=big())
+        html = (FIXTURES / "daad_watch_with_deadline.html").read_text()
+        return httpx.Response(200, html=html)
+
+    fetcher, _ = _fetcher(handler, max_bytes=5000)
+    src = Source(id="s", name="S", role="watch", url="https://a.example/start")
+    result = fetcher.fetch(src, src.url)
+    assert result.status == "ok"
+    assert len(pulled) < 20, f"drained {len(pulled)} chunks of a 1000-chunk redirect body"
+
+
+def test_a_redirect_loop_fails_instead_of_running_forever():
+    fetcher, _ = _fetcher(lambda r: httpx.Response(302, headers={"Location": r.url.path}))
+    src = Source(id="s", name="S", role="watch", url="https://a.example/loop")
+    result = fetcher.fetch(src, src.url)
+    assert result.status == "failed"
+    assert "redirect" in result.reason.lower()
+
+
+def test_a_redirect_to_a_non_http_url_is_not_followed():
+    fetcher, _ = _fetcher(lambda r: httpx.Response(302, headers={"Location": "file:///etc/passwd"}))
+    src = Source(id="s", name="S", role="watch", url="https://a.example/p")
+    assert fetcher.fetch(src, src.url).status == "failed"
+
+
+def test_links_on_a_redirected_page_resolve_against_where_the_page_ended_up():
+    """Found by the cross-model review. Canonicalisation used the requested URL
+    as its base, so `/start` redirecting to `/new/portal/` turned a relative
+    link `p0` into `/p0` instead of `/new/portal/p0`: a candidate link to the
+    wrong page, which P4 would then try to verify and promote."""
+
+    def handler(request):
+        if request.url.path == "/start":
+            return httpx.Response(302, headers={"Location": "/new/portal/"})
+        return httpx.Response(200, html=_portal([f"p{i}" for i in range(20)]))
+
+    fetcher, _ = _fetcher(handler)
+    src = Source(id="d", name="D", role="discover", url="https://a.example/start")
+    result = fetcher.fetch(src, src.url)
+    assert "https://a.example/new/portal/p0" in result.markdown
+    assert result.page_url == src.url, "the snapshot stays keyed on the registered URL"

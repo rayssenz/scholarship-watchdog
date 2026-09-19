@@ -12,7 +12,7 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import ClassVar
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 
@@ -24,6 +24,7 @@ from .clean import clean
 USER_AGENT = "scholarship-watchdog/0.1 (+https://github.com/rayssenz/scholarship-watchdog)"
 TIMEOUT = 25.0
 RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
+MAX_REDIRECTS = 5
 
 
 class HttpxFetcher:
@@ -39,9 +40,7 @@ class HttpxFetcher:
         max_bytes: int = MAX_RESPONSE_BYTES,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
-        self._client = client or httpx.Client(
-            timeout=TIMEOUT, follow_redirects=True, headers={"User-Agent": USER_AGENT}
-        )
+        self._client = client or httpx.Client(timeout=TIMEOUT, headers={"User-Agent": USER_AGENT})
         self._max_attempts = max_attempts
         self._max_bytes = max_bytes
         self._sleep = sleep
@@ -55,7 +54,7 @@ class HttpxFetcher:
         # cookies set during one fetch's redirect chain still apply within it.
         self._client.cookies.clear()
         self._wait_for_host(page_url, source.rate_limit_seconds)
-        status, text, failure = self._get_with_retries(page_url)
+        status, text, failure, final_url = self._get_with_retries(page_url)
 
         if status is None:
             return self._failed(source, page_url, reason=failure)
@@ -63,9 +62,13 @@ class HttpxFetcher:
         if status >= 400 or text is None:
             return self._failed(source, page_url, reason=failure, http_status=status)
 
+        # Relative links resolve against where the page ended up, not where the
+        # registry pointed: `/start` redirecting to `/new/portal/` must turn
+        # `award` into `/new/portal/award`, or discovery hands P4 a candidate
+        # link to the wrong page. The snapshot stays keyed on the registered URL.
         markdown = clean(text, keep_links=source.is_discover)
         if source.is_discover and markdown:
-            markdown = canonicalise_markdown_links(markdown, base=page_url)
+            markdown = canonicalise_markdown_links(markdown, base=final_url)
 
         return FetchResult(
             source_id=source.id,
@@ -76,48 +79,60 @@ class HttpxFetcher:
             http_status=status,
         )
 
-    def _get_with_retries(self, page_url: str) -> tuple[int | None, str | None, str | None]:
+    def _get_with_retries(self, page_url: str) -> tuple[int | None, str | None, str | None, str]:
         """Retry only what a retry can fix: transient status codes and timeouts.
 
         A 404 will not become a 200 on the third attempt, so retrying it only
         spends the run's time budget and hammers someone else's server.
 
-        The body is streamed rather than fetched whole, because the byte budget
-        has to be enforced while reading. A non-streaming get() has already
-        buffered the entire response by the time any check could run, which is
-        exactly the failure the budget exists to prevent, so the body is read
-        inside the stream context and this returns text rather than a response.
+        Returns (status, text, failure, final_url). Text is None on any failure.
         """
         failure: str | None = None
-        headers = {"User-Agent": USER_AGENT}
+        final_url = page_url
 
         for attempt in range(1, self._max_attempts + 1):
             try:
-                with self._client.stream(
-                    "GET", page_url, headers=headers, follow_redirects=True
-                ) as response:
-                    if response.status_code not in RETRY_STATUS:
-                        if response.status_code >= 400:
-                            return response.status_code, None, f"HTTP {response.status_code}"
-                        try:
-                            return (
-                                response.status_code,
-                                read_capped(response, self._max_bytes),
-                                None,
-                            )
-                        except ResponseTooLargeError as exc:
-                            return response.status_code, None, str(exc)
-
-                    failure = f"HTTP {response.status_code}"
-                    if attempt == self._max_attempts:
-                        return response.status_code, None, failure
+                status, text, failure, final_url = self._get_following_redirects(page_url)
             except httpx.HTTPError as exc:
-                failure = type(exc).__name__
+                status, text, failure = None, None, type(exc).__name__
+            else:
+                if status not in RETRY_STATUS or attempt == self._max_attempts:
+                    return status, text, failure, final_url
 
             if attempt < self._max_attempts:
                 self._sleep(float(2 ** (attempt - 1)))
 
-        return None, None, failure
+        return None, None, failure, final_url
+
+    def _get_following_redirects(self, page_url: str) -> tuple[int, str | None, str | None, str]:
+        """One attempt: follow redirects by hand, reading only the final body.
+
+        Redirects are not left to httpx, because httpx reads each intermediate
+        response's body in full before following it, and the byte budget cannot
+        see those reads. A 302 streaming gigabytes was drained completely and
+        the fetch still returned ok. Here each redirect is closed unread.
+
+        Every body is streamed rather than fetched whole, because the budget has
+        to be enforced while reading: a buffering get() has already consumed the
+        response by the time any check could run.
+        """
+        url = page_url
+        headers = {"User-Agent": USER_AGENT}
+        for _ in range(MAX_REDIRECTS + 1):
+            with self._client.stream("GET", url, headers=headers, follow_redirects=False) as resp:
+                if resp.is_redirect:
+                    status = resp.status_code
+                    url = urljoin(str(resp.url), resp.headers["location"])
+                    if urlsplit(url).scheme not in ("http", "https"):
+                        return status, None, "redirect to a non-http URL", url
+                    continue
+                if resp.status_code >= 400:
+                    return resp.status_code, None, f"HTTP {resp.status_code}", url
+                try:
+                    return resp.status_code, read_capped(resp, self._max_bytes), None, url
+                except ResponseTooLargeError as exc:
+                    return resp.status_code, None, str(exc), url
+        return status, None, f"more than {MAX_REDIRECTS} redirects", url
 
     def _wait_for_host(self, page_url: str, rate_limit_seconds: float) -> None:
         host = urlsplit(page_url).netloc
