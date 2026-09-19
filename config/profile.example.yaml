@@ -9,7 +9,7 @@
 
 citizenship: XX                 # ISO country code
 residency: XX
-date_of_birth: 1990-01-01       # used only for age-limit blockers
+date_of_birth: 1990-01-01       # held for age limits; no scoring rule reads it yet
 
 degree:
   held: bachelor                # highest completed: bachelor / master / phd

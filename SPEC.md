@@ -123,7 +123,7 @@ Bot walls belong in that list because they are the common case for a university 
 
 The earlier rule advanced such a page, which cost three things: the broken page overwrote the last real content that later stages need once the site recovers, it became its own baseline so content collapse fired once and then compared the wall against itself, and a Firecrawl render that returned nothing was classified as a failure the content checks never saw. The cost of the current rule is that a false-positive error signature freezes a page's snapshot until the pattern is corrected, which is loud rather than silent.
 
-A per-source staleness figure is reported in the run report but does not alert. Scholarship pages legitimately go six to twelve months unchanged, so any configured cadence would either never fire or cry wolf, and there is no data to tune fourteen of them against.
+A per-source staleness figure is reported in the run report but does not alert. Scholarship pages legitimately go six to twelve months unchanged, so any configured cadence would either never fire or cry wolf, and there is no data to tune thirteen of them against.
 
 ### 3.2 `extract`
 
@@ -229,7 +229,7 @@ A single key would be wrong. With identity alone, a programme already notified s
 
 **The identity hash deliberately excludes model output where it can.** `source_id` comes from the registry and cannot drift; `program` is the single model-produced component and is normalised hard. An earlier draft used `sha256(institution + program)` and claimed cross-source dedup as a property: that the same programme found on a university page and on an aggregator would collapse to one row. It cannot work. Both strings are LLM output. "Tsinghua University CSC" and "Chinese Government Scholarship (Tsinghua)" never collide, and `institution` for a government scheme is whatever the model called the ministry that run. The claim is withdrawn rather than softened.
 
-**Cross-source duplication is handled by a hand-maintained alias file** in `config/aliases.yaml`, listing identity hashes to merge. At fourteen sources this is a few lines, edited when a duplicate is noticed. A residual remains and is worth stating: `normalize()` reduces paraphrase churn without eliminating it, so "CSC Bilateral Program" and "Chinese Government Scholarship Bilateral Program" survive normalisation as distinct records. The failure mode degrades from a silently split identity to an occasional duplicate email, which for a single user is cheap and self-corrects once a source's wording settles.
+**Cross-source duplication is handled by a hand-maintained alias file** in `config/aliases.yaml`, listing identity hashes to merge. At thirteen sources this is a few lines, edited when a duplicate is noticed. A residual remains and is worth stating: `normalize()` reduces paraphrase churn without eliminating it, so "CSC Bilateral Program" and "Chinese Government Scholarship Bilateral Program" survive normalisation as distinct records. The failure mode degrades from a silently split identity to an occasional duplicate email, which for a single user is cheap and self-corrects once a source's wording settles.
 
 Stripping years in `normalize()` is load-bearing beyond tidiness: it is what makes an annually re-listed programme collapse onto its existing identity, so the new intake registers as a content change on a known record rather than as a new discovery.
 
@@ -291,8 +291,10 @@ them. Public sources only: a counter naming a private source would put an
 aggregate about private state in the committed tree, which section 5 forbids
 even for counts. Private counters join the bundle in P3.
 
-Before P3 builds the bundle, private snapshots and counters go to a gitignored
-`.private/` directory in the checkout root. The destination is chosen in one
+Before P3 builds the bundle, private snapshots go to a gitignored `.private/`
+directory in the checkout root, and private sources are not counted at all: the
+skipped-source check cannot fire for a private source until its counter has a
+private home in the bundle. The destination is chosen in one
 module rather than at each call site, because section 5 records this leak being
 rediscovered four times, and every rediscovery was a new output path applying
 the rule from memory.
@@ -403,12 +405,13 @@ One consequence is worth stating rather than discovering later. Section 3.6 just
 
 ## 6. Phases
 
-Each phase ends with a tagged, working state and a demonstrable artifact.
+Each phase ends with a working state and a demonstrable artifact. Phases are not tagged; the first tag is `v0.1.0`, at the end of P5.
 
 An earlier split placed promotion in P2, while promotion writes the private bundle and reports through the digest, both of which are P3. Promotion could not have been built or tested end to end where it sat, so it moves to its own phase after the machinery it depends on exists.
 
 **P1, foundation (~3h).** Project scaffold: `pyproject.toml` pinning Python 3.12, ruff, pytest, CI on push, and the package layout `src/scholarship_watchdog/{fetch,extract,score,store,notify}/` with tests in `tests/<stage>/`; Pydantic record schema and YAML config loading with a sanitized example profile; the fetch stage with roles, `(source_id, page_url)` snapshot storage, change detection, link-preserving cleaning for discover sources, and fetch-stage health checks. The package is `scholarship_watchdog` rather than `watchdog`, which is taken on PyPI by a widely installed filesystem-monitoring library; shadowing it would make `import watchdog` resolve differently depending on what else is installed.
 *Acceptance:* a manual run fetches every registered page, writes snapshots, and produces usable JSON; a second run reports every page unchanged; a source serving an error page trips a health check rather than passing silently; the role-aware probe fails a `watch` source with no deadline and passes a `discover` source without one; tests and lint pass in CI.
+*As delivered,* recorded so a later phase does not rediscover it. With no extraction yet, the fetch stage advances each page's snapshot itself, as soon as the page passes its health check; section 3.6 places the advance at step 8, after extraction, scoring and notification, and P2 has to move it there or a failed extraction will lose the change it was processing. The thresholds `notify_tiers`, `verification_cap` and `transient_max_attempts` from section 3.3 are not modelled yet; P3 and P4 own their consumers. The per-source page cap in section 3.1 is moot while every source is one URL. Fetch-stage items deferred with reasons: memory held by a decompressed response before the byte cap sees it, an overall wall-clock deadline per request, change diffs in the run report, a deadline check that pairs any date with any deadline word, and rate limiting and a project user agent on the Firecrawl path.
 
 **P2, intelligence (~5h).** Extraction behind the `Extractor` protocol with structured output, including discover-mode extraction emitting `candidate_url`; the golden eval set with both watch and discover cases, its CI gate and the model benchmark it doubles as; deterministic scoring with the null policy, tier thresholds and profile-hash re-evaluation; the JSONL store with dual hashing.
 *Acceptance:* changed pages produce validated records; a discover page produces stubs carrying resolved links; the eval suite passes and demonstrably fails on a deliberately degraded prompt; scoring is covered by unit tests including every null-policy row and the `next-cycle` routing.

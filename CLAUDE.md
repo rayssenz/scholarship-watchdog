@@ -133,11 +133,13 @@ Scoring carries no LLM call and no I/O, so it is a pure function of
 
 ### Verify (run from repo root)
 
-Runs today:
-
 ```bash
-pip install pyyaml && python scripts/probe_sources.py   # registry gate
-python scripts/sync_diagrams.py --check              # SPEC mermaid matches .mmd; SVGs carry a background
+pip install -e ".[dev]"                   # once, into a Python 3.12 environment
+ruff check . && ruff format --check .
+pytest                                    # the golden-set eval gate joins in P2
+python scripts/sync_diagrams.py --check   # SPEC mermaid matches .mmd; SVGs carry a background
+python scripts/probe_sources.py           # registry gate, live network
+scholarship-watchdog fetch                # one real pass over the registry, live network
 ```
 
 The probe hits the live network, so results vary with host availability, and it is not a
@@ -145,17 +147,11 @@ CI gate. A source it cannot reach this run is reported and excluded rather than 
 since a timeout is a network fact and not a registry defect. A browser-only source is
 judged against the `verified` note the registry carries from a hand-check.
 
-From P1, once `pyproject.toml` exists:
-
-```bash
-ruff check .
-pytest              # the golden-set eval gate joins in P2
-```
-
 ### Git
 
-Trunk-based, short-lived branches, Conventional Commits on one line, squash-merge to a
-protected `main`. The `data` branch is an orphan holding runtime state and is never
+Trunk-based, short-lived branches, Conventional Commits on one line. A single-idea branch
+is squash-merged; a phase branch, whose commits are each one idea, is rebase-merged. Branch
+protection on `main` is switched on once CI has run on a pull request. The `data` branch is an orphan holding runtime state and is never
 merged. Full rationale in [`docs/git-conventions.md`](./docs/git-conventions.md).
 
 Documents that ship to a reader (`README.md`, `SPEC.md`, `docs/`) get an editing pass

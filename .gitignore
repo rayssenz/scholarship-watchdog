@@ -21,8 +21,9 @@ profile.yml
 # own .gitignore without this line rather than the workflow using `git add -f`.
 data/
 
-# Decrypted private bundle. The run decrypts outside the working tree, but this
-# is the second line of defence if that ever regresses.
+# Private runtime state. Until P3 builds the encrypted bundle, the snapshots of
+# private sources live here in plaintext. From P3 the bundle is decrypted outside
+# the working tree, and this line is the second line of defence if that regresses.
 .private/
 *.decrypted
 

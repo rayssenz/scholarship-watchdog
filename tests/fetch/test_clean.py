@@ -68,7 +68,7 @@ def _link_index(entries: int, *, wrapped: bool) -> str:
 def test_a_flat_link_index_loses_its_targets_but_keeps_its_text():
     """The measured limit SPEC 3.1 records, pinned so the prose cannot drift.
 
-    The paragraph in SPEC 3.1 was wrong for a year of nobody testing it: it
+    The paragraph in SPEC 3.1 was wrong, with nothing testing it: it
     claimed a bare index "survives cleaning as nothing at all" and that
     surrounding prose was the enabling condition. Both are false. The text
     survives without its hrefs, and the deciding factors are the content region

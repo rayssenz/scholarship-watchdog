@@ -71,8 +71,8 @@ Four candidates from the open skills registry, searched and vetted by install co
 | 1. Requirement gathering | complete |
 | 2. Specification drafting | complete |
 | 3. Design review | three rounds complete and applied |
-| 4. Implementation | in progress: P1 |
-| 5. Testing and validation | acceptance criteria written per phase in `SPEC.md` section 6 |
+| 4. Implementation | P1 built and reviewed; P2 next |
+| 5. Testing and validation | P1 acceptance run against the live registry, evidence in `docs/p1-acceptance.md` |
 
 The gate for leaving stage 2 is mechanical rather than a judgement call:
 
