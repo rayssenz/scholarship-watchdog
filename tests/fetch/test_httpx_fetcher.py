@@ -279,3 +279,14 @@ def test_links_on_a_redirected_page_resolve_against_where_the_page_ended_up():
     result = fetcher.fetch(src, src.url)
     assert "https://a.example/new/portal/p0" in result.markdown
     assert result.page_url == src.url, "the snapshot stays keyed on the registered URL"
+
+
+def test_a_3xx_page_without_a_location_is_read_as_a_page():
+    """`is_redirect` is true for every 3xx. A `300 Multiple Choices` page listing
+    alternatives has no Location to follow, and the manual redirect loop turned
+    it into failed/KeyError where httpx used to return its body."""
+    html = (FIXTURES / "daad_watch_with_deadline.html").read_text()
+    fetcher, _ = _fetcher(lambda r: httpx.Response(300, html=html))
+    result = fetcher.fetch(WATCH, WATCH.url)
+    assert result.status == "ok"
+    assert "1 October 2027" in result.markdown

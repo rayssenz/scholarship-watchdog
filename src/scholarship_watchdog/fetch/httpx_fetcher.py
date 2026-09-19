@@ -120,7 +120,9 @@ class HttpxFetcher:
         headers = {"User-Agent": USER_AGENT}
         for _ in range(MAX_REDIRECTS + 1):
             with self._client.stream("GET", url, headers=headers, follow_redirects=False) as resp:
-                if resp.is_redirect:
+                # is_redirect is true for every 3xx; only a usable Location is
+                # followed. A 300 page listing alternatives is read as a page.
+                if resp.has_redirect_location:
                     status = resp.status_code
                     url = urljoin(str(resp.url), resp.headers["location"])
                     if urlsplit(url).scheme not in ("http", "https"):

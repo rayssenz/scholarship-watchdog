@@ -60,6 +60,10 @@ class FirecrawlFetcher:
         if not self._api_key:
             return self._result(source, page_url, None, "skipped", reason=NO_KEY)
 
+        # Same reason as the httpx fetcher: one client serves private and public
+        # sources, and a cookie set during one scrape must not reach the next.
+        self._client.cookies.clear()
+
         status, text, failure = self._post_with_retries(page_url)
         if status is None:
             return self._result(source, page_url, None, "failed", reason=failure)

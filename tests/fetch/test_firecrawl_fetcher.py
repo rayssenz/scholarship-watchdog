@@ -221,3 +221,22 @@ def test_links_resolve_against_the_url_firecrawl_ended_up_on():
     )
     result = fetcher.fetch(CSC, "https://www.example.org/start")
     assert "https://www.example.org/new/portal/award" in result.markdown
+
+
+def test_no_cookie_from_one_scrape_reaches_the_next():
+    """The httpx fetcher clears its jar per fetch; this one did not. A cookie
+    the API set during a private scrape rode along on the next public one."""
+    seen = []
+
+    def handler(request):
+        seen.append(request.headers.get("cookie"))
+        return httpx.Response(
+            200,
+            json={"success": True, "data": {"markdown": "text"}},
+            headers={"Set-Cookie": "choice=QQ; Path=/"},
+        )
+
+    fetcher, _ = _fetcher(handler)
+    fetcher.fetch(NUS, NUS.url)
+    fetcher.fetch(CSC, CSC.url)
+    assert seen == [None, None]
