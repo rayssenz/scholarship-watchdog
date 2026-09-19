@@ -347,3 +347,23 @@ def test_the_run_report_does_not_mark_a_healthy_page_broken(tmp_path):
         "sources"
     ][0]
     assert row["broken"] is False
+
+
+def test_a_watch_page_that_404s_every_week_alerts_through_the_real_pipeline(tmp_path):
+    """The failure the review constructed, end to end with a real fetcher.
+
+    Three weekly runs of a moved page used to produce three empty alert lists.
+    """
+    import httpx
+
+    from scholarship_watchdog.fetch.httpx_fetcher import HttpxFetcher
+
+    moved = HttpxFetcher(
+        client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(404))),
+        sleep=lambda s: None,
+    )
+    checks = []
+    for _ in range(3):
+        run = fetch_all([PUBLIC_WATCH], fetchers={"httpx": moved}, repo_root=tmp_path)
+        checks.append([a.check for a in run.alerts])
+    assert checks == [[], ["skipped_twice"], ["skipped_twice"]]

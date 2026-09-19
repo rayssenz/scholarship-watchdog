@@ -18,7 +18,7 @@ Four checks, three of them on the freshly fetched page and one across runs:
                          JavaScript" pattern instead
   content_collapse       cleaned markdown under 40% of the previous snapshot
   watch_without_deadline a watch source that stopped carrying a date
-  skipped_twice          a source skipped on two consecutive runs
+  skipped_twice          a source skipped or failed on two consecutive runs
 
 Staleness is deliberately not a check. Scholarship pages legitimately go six to
 twelve months unchanged, so any cadence would either never fire or cry wolf,
@@ -131,7 +131,15 @@ def check_page(source: Source, result: FetchResult, previous: PageState) -> list
 
 
 class SkipLedger:
-    """Consecutive-skip counters, public sources only.
+    """Consecutive-unsuccessful-run counters, public sources only.
+
+    SPEC.md section 3.1 files two causes under one check: a source skipped for
+    want of a Firecrawl key, and a source whose fetch keeps failing. Both count
+    here, and only a page that actually arrived resets the counter. Counting
+    skips alone left the second cause unfireable: a watch page that moved (404)
+    or a host that went away failed every week in silence, because a failure
+    reset the counter and `check_page` raises nothing for a page that did not
+    arrive.
 
     Cross-run state, so it needs somewhere to live. Until P3 builds the
     encrypted bundle, public counters go to `data/health.json`; a private
@@ -146,21 +154,31 @@ class SkipLedger:
 
     @classmethod
     def load(cls, repo_root: Path | None = None) -> SkipLedger:
+        """Load the counters, or start empty if the file is missing or malformed.
+
+        A counter is a convenience; losing it costs one late alert. Aborting a
+        deadline watch over it would cost a missed scholarship, so anything that
+        is not a mapping of ids to non-negative integers is discarded rather
+        than trusted, including well-formed JSON of the wrong shape.
+        """
         path = health_path(repo_root=repo_root)
-        counts: dict[str, int] = {}
-        if path.exists():
-            try:
-                counts = json.loads(path.read_text()).get("consecutive_skips", {})
-            except (json.JSONDecodeError, AttributeError):
-                counts = {}
-        return cls(path, counts)
+        if not path.exists():
+            return cls(path, {})
+        try:
+            counts = json.loads(path.read_text()).get("consecutive_skips")
+        except (json.JSONDecodeError, AttributeError):
+            return cls(path, {})
+        valid = isinstance(counts, dict) and all(
+            isinstance(k, str) and type(v) is int and v >= 0 for k, v in counts.items()
+        )
+        return cls(path, counts if valid else {})
 
     def record(self, source: Source, result: FetchResult) -> Alert | None:
-        """Count this outcome and return an alert on the second skip running."""
+        """Count this outcome; alert on the second unsuccessful run running."""
         if source.private:
             return None
 
-        if result.status != "skipped":
+        if result.status not in ("skipped", "failed"):
             self._counts.pop(source.id, None)
             return None
 
@@ -170,7 +188,7 @@ class SkipLedger:
         return Alert(
             source.id,
             "skipped_twice",
-            f"skipped {self._counts[source.id]} runs running: {result.reason}",
+            f"not fetched {self._counts[source.id]} runs running: {result.reason}",
         )
 
     def save(self) -> None:

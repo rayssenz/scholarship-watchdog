@@ -231,3 +231,45 @@ def test_a_waf_bot_block_served_as_http_200_trips_the_error_signature():
     for body in bodies:
         alerts = check_page(WATCH, _result(WATCH, body), _no_previous())
         assert [a.check for a in alerts] == ["error_signature"], body
+
+
+def test_a_source_failing_two_runs_running_alerts(tmp_path):
+    """SPEC 3.1 names "repeated fetch failure" under the skipped-source check.
+
+    The ledger used to count skips only and reset on a failure, so a watch page
+    that moved (404), a host that went away, or a page timing out every week
+    never raised an alert. It showed up only as a count in the run report. That
+    is the one case where the watched deadline has actually gone.
+    """
+    failed = _result(WATCH, None, status="failed", reason="HTTP 404")
+    ledger = SkipLedger.load(tmp_path)
+    assert ledger.record(WATCH, failed) is None, "one bad week is not yet a trend"
+    alert = ledger.record(WATCH, failed)
+    assert alert is not None
+    assert alert.check == "skipped_twice"
+    assert "HTTP 404" in alert.detail
+
+
+def test_a_failure_then_a_skip_counts_as_two_unsuccessful_runs(tmp_path):
+    ledger = SkipLedger.load(tmp_path)
+    ledger.record(FIRECRAWL, _result(FIRECRAWL, None, status="failed", reason="HTTP 503"))
+    alert = ledger.record(FIRECRAWL, _result(FIRECRAWL, None, status="skipped", reason="no key"))
+    assert alert is not None
+
+
+def test_a_health_file_of_the_wrong_shape_resets_rather_than_crashing(tmp_path):
+    """Well-formed JSON of the wrong shape used to load, then crash record()
+    with AttributeError or TypeError before the run report was written."""
+    for body in (
+        '{"consecutive_skips": []}',
+        '{"consecutive_skips": null}',
+        '{"consecutive_skips": {"daad-study": "1"}}',
+        '{"consecutive_skips": {"daad-study": -3}}',
+        "[1, 2, 3]",
+    ):
+        (tmp_path / "data").mkdir(exist_ok=True)
+        (tmp_path / "data" / "health.json").write_text(body)
+        ledger = SkipLedger.load(tmp_path)
+        failed = _result(WATCH, None, status="failed", reason="HTTP 404")
+        assert ledger.record(WATCH, failed) is None, body
+        assert ledger.record(WATCH, _result(WATCH, "content")) is None, body
