@@ -562,3 +562,12 @@ class Selective:
             fetched_at=datetime.now(UTC),
             http_status=200,
         )
+
+
+def test_the_summary_says_broken_rather_than_changed(tmp_path):
+    """A bot wall is changed every run by hash and is never new content. The
+    summary is what a human reads, so it reports the judgement, not the hash."""
+    from scholarship_watchdog.cli import render_summary
+
+    run = fetch_all([PUBLIC_WATCH], fetchers={"httpx": AccessDeniedPage()}, repo_root=tmp_path)
+    assert render_summary(run) == [f"{'daad-study':<32} {'watch':<9} broken"]

@@ -45,7 +45,9 @@ def render_summary(run: FetchRun) -> list[str]:
         if outcome.source.private:
             continue
         state = outcome.result.status
-        if outcome.change is not None:
+        if outcome.broken:
+            state = "broken"
+        elif outcome.change is not None:
             state = "changed" if outcome.change.changed else "unchanged"
         lines.append(f"{outcome.source.id:<32} {outcome.source.role:<9} {state}")
     return lines
