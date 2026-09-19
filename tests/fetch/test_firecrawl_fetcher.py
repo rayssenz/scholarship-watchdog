@@ -180,3 +180,44 @@ def test_an_oversized_firecrawl_response_is_failed():
     result = fetcher.fetch(NUS, NUS.url)
     assert result.status == "failed"
     assert "too large" in result.reason
+
+
+def _rendered(markdown, **metadata):
+    payload = {"success": True, "data": {"markdown": markdown, "metadata": metadata}}
+    return lambda request: httpx.Response(200, json=payload)
+
+
+def test_an_origin_error_behind_a_successful_render_is_failed():
+    """Firecrawl answers 200 for its own API call and reports the target page's
+    status in `data.metadata.statusCode` (checked against docs.firecrawl.dev on
+    2026-09-19). Reading only the API status stored a maintenance page served
+    with 503 as a good snapshot, contrary to SPEC 3.1's rule that HTTP 400 or
+    worse is a failure. Found by two reviewers."""
+    fetcher, _ = _fetcher(_rendered("Down for maintenance.", statusCode=503))
+    result = fetcher.fetch(NUS, NUS.url)
+    assert result.status == "failed"
+    assert result.http_status == 503
+    assert "503" in result.reason
+
+
+def test_the_origin_status_is_recorded_when_the_page_is_fine():
+    fetcher, _ = _fetcher(_rendered("# NUS\n\nDeadline: 1 January 2027", statusCode=200))
+    result = fetcher.fetch(NUS, NUS.url)
+    assert result.status == "ok"
+    assert result.http_status == 200
+
+
+def test_a_render_without_metadata_is_still_accepted():
+    """The field is documented but not promised on every response."""
+    fetcher, _ = _fetcher(_ok("# NUS\n\nDeadline: 1 January 2027"))
+    assert fetcher.fetch(NUS, NUS.url).status == "ok"
+
+
+def test_links_resolve_against_the_url_firecrawl_ended_up_on():
+    """The same redirect question the httpx fetcher answers: a relative link
+    resolves against where the page ended up, reported as `metadata.url`."""
+    fetcher, _ = _fetcher(
+        _rendered("- [Award](award)", statusCode=200, url="https://www.example.org/new/portal/")
+    )
+    result = fetcher.fetch(CSC, "https://www.example.org/start")
+    assert "https://www.example.org/new/portal/award" in result.markdown

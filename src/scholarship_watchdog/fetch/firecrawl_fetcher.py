@@ -92,14 +92,27 @@ class FirecrawlFetcher:
             return failed(reason="firecrawl markdown was not text")
         markdown = markdown.strip()
 
+        # The API answers 200 for its own call and reports the target page's
+        # status separately, in data.metadata.statusCode (docs.firecrawl.dev,
+        # checked 2026-09-19). A maintenance page served with 503 is a failure
+        # under SPEC 3.1 however cleanly it rendered, and must not become a
+        # snapshot. metadata.url is where the page ended up after redirects.
+        metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+        origin = metadata.get("statusCode")
+        if type(origin) is int:
+            status = origin
+            if origin >= 400:
+                return failed(reason=f"origin HTTP {origin}", http_status=origin)
+        final_url = metadata.get("url") if isinstance(metadata.get("url"), str) else page_url
+
+        if source.is_discover and markdown:
+            markdown = canonicalise_markdown_links(markdown, base=final_url)
+
         # An empty render is returned as an ok page with no text, exactly as the
         # httpx fetcher returns a JavaScript shell that cleans to nothing. The
         # health check then calls it broken, it is never stored, and it alerts
         # every run. Returning `failed` here instead made it silent, because a
         # page that did not arrive gets no content check. SPEC 3.1, ruling R14.
-        if source.is_discover and markdown:
-            markdown = canonicalise_markdown_links(markdown, base=page_url)
-
         return self._result(source, page_url, markdown, "ok", http_status=status)
 
     def _post_with_retries(self, page_url: str) -> tuple[int | None, str | None, str | None]:
