@@ -8,7 +8,8 @@ deadline pages are fetched at all, starving the guarantee the system exists to
 provide.
 
 Per page, the order is fetch, then health check, then the change gate, then
-advance. The health check precedes the gate for the reason section 3.1 gives.
+advance. The health check precedes the gate for the reason section 3.1 gives,
+and a page it calls broken is not advanced.
 """
 
 from __future__ import annotations
@@ -43,7 +44,8 @@ class PageOutcome:
     change: Change | None
     advanced: bool
     broken: bool = False
-    """The health check called this page an error, whatever its hash says.
+    """The health check called this page an error or a collapse, whatever its
+    hash says. A broken page is never stored as a snapshot.
 
     Kept separate from `change.changed` because the two answer different
     questions and a bot wall answers them oppositely: an Imperva block carries a
@@ -51,6 +53,11 @@ class PageOutcome:
     new content. Downstream stages read this, not the hash, when deciding
     whether a page is worth extracting or notifying on. SPEC.md section 3.1.
     """
+
+
+BROKEN_CHECKS = frozenset({"error_signature", "content_collapse"})
+"""The checks that say the fetched bytes are not the page. `watch_without_deadline`
+is deliberately absent: a page with no deadline is still real content."""
 
 
 @dataclass
@@ -100,26 +107,23 @@ def fetch_all(
             run.pages.append(PageOutcome(source, result, None, advanced=False))
             continue
 
+        # A page the health check calls broken is stored like a failed fetch:
+        # not at all. Ruling R14, SPEC 3.1. Storing it overwrote the last real
+        # content, which later stages need once the site recovers, and made the
+        # broken page its own baseline, so content_collapse fired once and then
+        # compared the wall against itself forever.
+        #
+        # `changed` stays a truthful statement about the hash and `broken`
+        # carries the judgement. They answer different questions: a bot wall
+        # regenerates an incident ID on every request, so it is genuinely
+        # changed every run and equally genuinely not new content.
+        broken = any(a.check in BROKEN_CHECKS for a in page_alerts)
         change = detect_change(previous, result.markdown)
-        if change.changed:
+        advanced = change.changed and not broken
+        if advanced:
             advance(source, source.url, result.markdown, repo_root=repo_root)
 
-        # `changed` stays a truthful statement about the hash. `broken` is the
-        # separate question of whether the bytes are a page at all, and the two
-        # must not be collapsed: a bot wall regenerates an incident ID on every
-        # request, so it is genuinely changed every run and equally genuinely
-        # not new content. Suppressing `changed` here would also make the
-        # ordering guard's "run two sees no change" precondition trivially
-        # true, which would quietly retire the hardest test in this stage.
-        run.pages.append(
-            PageOutcome(
-                source,
-                result,
-                change,
-                advanced=change.changed,
-                broken=any(a.check == "error_signature" for a in page_alerts),
-            )
-        )
+        run.pages.append(PageOutcome(source, result, change, advanced=advanced, broken=broken))
 
     ledger.save()
     return run

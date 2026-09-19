@@ -144,19 +144,30 @@ def test_a_200_whose_json_is_not_an_object_is_failed():
     assert fetcher.fetch(NUS, NUS.url).status == "failed"
 
 
-def test_a_successful_payload_carrying_no_markdown_is_failed():
-    """SPEC 3.1: a page that stores an empty snapshot looks unchanged forever.
-
-    `{"success": true, "data": null}` previously returned ok with empty
-    markdown, which advances an empty snapshot. The content-collapse check
-    fires once on that run and never again, because the empty snapshot becomes
-    the baseline it compares against.
-    """
-    for payload in ({"success": True, "data": None}, {"success": True, "data": {"markdown": ""}}):
+def test_a_malformed_success_payload_is_failed():
+    """A success envelope with no data object, or with markdown that is not
+    text, is a protocol error rather than a page. It is failed, not stored."""
+    for payload in (
+        {"success": True, "data": None},
+        {"success": True},
+        {"success": True, "data": {"markdown": 42}},
+    ):
         fetcher, _ = _fetcher(lambda request, p=payload: httpx.Response(200, json=p))
         result = fetcher.fetch(NUS, NUS.url)
         assert result.status == "failed", payload
         assert result.markdown is None, payload
+
+
+def test_an_empty_render_is_an_ok_page_with_no_text():
+    """The same shape the httpx fetcher returns for a JavaScript shell, so one
+    health check covers both fetchers. Ruling R14 keeps it out of the snapshot
+    store; returning failed instead made it raise nothing at all."""
+    for markdown in ("", "   "):
+        payload = {"success": True, "data": {"markdown": markdown}}
+        fetcher, _ = _fetcher(lambda request, p=payload: httpx.Response(200, json=p))
+        result = fetcher.fetch(NUS, NUS.url)
+        assert result.status == "ok"
+        assert result.markdown == ""
 
 
 def test_an_oversized_firecrawl_response_is_failed():

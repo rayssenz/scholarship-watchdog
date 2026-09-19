@@ -85,15 +85,19 @@ class FirecrawlFetcher:
             return failed(reason=str(payload.get("error", "firecrawl reported failure")))
 
         data = payload.get("data")
-        markdown = (data.get("markdown") if isinstance(data, dict) else None) or ""
+        if not isinstance(data, dict):
+            return failed(reason="firecrawl payload carried no data object")
+        markdown = data.get("markdown") or ""
+        if not isinstance(markdown, str):
+            return failed(reason="firecrawl markdown was not text")
         markdown = markdown.strip()
-        if not markdown:
-            # Not ok-with-nothing: an empty snapshot becomes the baseline every
-            # later run compares against, so the page reads as unchanged forever
-            # and the content-collapse check can never fire again. SPEC 3.1.
-            return failed(reason="firecrawl returned no markdown")
 
-        if source.is_discover:
+        # An empty render is returned as an ok page with no text, exactly as the
+        # httpx fetcher returns a JavaScript shell that cleans to nothing. The
+        # health check then calls it broken, it is never stored, and it alerts
+        # every run. Returning `failed` here instead made it silent, because a
+        # page that did not arrive gets no content check. SPEC 3.1, ruling R14.
+        if source.is_discover and markdown:
             markdown = canonicalise_markdown_links(markdown, base=page_url)
 
         return self._result(source, page_url, markdown, "ok", http_status=status)

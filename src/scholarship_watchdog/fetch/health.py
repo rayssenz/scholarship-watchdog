@@ -1,11 +1,12 @@
 """Catch a source that broke without saying so. See SPEC.md section 3.1.
 
 These checks run *before* the change-detection skip gate, and the ordering is
-the point rather than a detail. A broken source is by construction unchanged
-after its first broken fetch: the error page becomes the stored snapshot, the
-next run sees no change, and any alarm placed after the gate is unreachable
-forever. Checking the fetch result rather than the extraction count is what
-makes breakage detectable at all.
+the point rather than a detail. A page they call broken is never stored, but a
+snapshot can already be broken before anything flagged it: written before a new
+signature existed, or before that rule did. Such a page is unchanged every
+week, and any alarm placed after the gate would be unreachable for it forever.
+Checking the fetch result rather than the extraction count is what makes
+breakage detectable at all.
 
 Four checks, three of them on the freshly fetched page and one across runs:
 
@@ -59,7 +60,7 @@ ERROR_SIGNATURES: tuple[re.Pattern[str], ...] = (
     # Imperva block getting through every pattern above it: see
     # docs/p1-acceptance.md. Each is matched on a phrase the vendor's own
     # interstitial prints, not on a generic word, because a false positive here
-    # now also suppresses the change flag.
+    # freezes the page's snapshot until the pattern is corrected.
     re.compile(r"incapsula incident", re.I),
     re.compile(r"request unsuccessful", re.I),
     re.compile(r"attention required.{0,3}\| cloudflare", re.I),

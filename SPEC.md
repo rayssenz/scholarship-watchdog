@@ -107,7 +107,7 @@ A bounded one-level crawl (`follow_links`) was specified in an earlier draft and
 
 An unchanged page terminates the pipeline for that page. This is the primary cost control.
 
-**Health checks run before the skip gate**, because a broken source is by construction unchanged after its first broken fetch: the error page becomes the stored snapshot, the next run sees no change, and any alarm placed after the gate can never fire. Checking the fetch result rather than the extraction count is what makes breakage detectable at all.
+**Health checks run before the skip gate**, because an alarm placed after it can never fire for a page that stays broken and unchanged. A page the checks call broken is never stored (see below), so the gate meets a broken page only when the stored snapshot was already broken before anything flagged it: written before a new error signature was added, or before this rule existed. That page is identical every week, and a check behind the gate would stay silent for it indefinitely. Checking the fetch result rather than the extraction count is what makes breakage detectable at all.
 
 | Check | Alerts when |
 | --- | --- |
@@ -117,15 +117,11 @@ An unchanged page terminates the pipeline for that page. This is the primary cos
 
 Bot walls belong in that list because they are the common case for a university portal and they are all served with HTTP 200. The P1 acceptance run measured one getting past every other pattern: an Imperva block whose entire body was `Request unsuccessful. Incapsula incident ID: ...`. A `watch` source caught it only because the deadline check fired; a `discover` source blocked the same way would have passed silently.
 
-**A page the error-signature check rejects is marked broken, and broken is not the same question as changed.** A bot wall regenerates its incident ID on every request, so its hash never settles: it is genuinely changed every run and is equally genuinely not new content. Reporting it as changed would put a permanently broken page into the digest every week. Collapsing the two the other way, by forcing such a page to report unchanged, is worse: it would make the second-run precondition that proves the health check runs ahead of the skip gate trivially true, retiring the guard this section exists to establish. So the hash stays a truthful statement about the bytes, `broken` carries the judgement, and later stages read `broken` when deciding whether a page is worth extracting or notifying on.
+**A page the error-signature or content-collapse check rejects is marked broken, and broken is not the same question as changed.** A bot wall regenerates its incident ID on every request, so its hash never settles: it is genuinely changed every run and is equally genuinely not new content. The hash therefore stays a truthful statement about the bytes, `broken` carries the judgement, and later stages read `broken` when deciding whether a page is worth extracting or notifying on. A page that merely lacks a deadline is not broken; it is real content that fails a different expectation.
 
-The two failure shapes are treated differently, because section 4 requires a
-failed page to keep its stored snapshot. A fetch that raises, times out, or
-returns HTTP 400 or worse is a failure: nothing is stored, and the next weekly
-run retries it. A page that returns HTTP 200 carrying an "Access Denied" body
-or an empty JavaScript shell succeeded at the transport level, so its snapshot
-does advance, and the pre-gate health check is what catches it on that run and
-on every run afterwards.
+**A broken page is stored exactly as a failed fetch is: not at all.** Section 4 requires a failed page to keep its stored snapshot, so a fetch that raises, times out, or returns HTTP 400 or worse stores nothing and the next weekly run retries it. A page that returns HTTP 200 but carries an "Access Denied" body, a bot wall, an empty JavaScript shell, or a collapse to under 40% of the previous snapshot succeeded at the transport level and failed at every level that matters, and it is handled the same way: the last good snapshot is kept, and the health check alerts on that run and on every run until the page recovers. Both fetchers present the same symptom the same way, so an empty Firecrawl render reaches the check as an ok page with no text, exactly as an empty `httpx` extraction does.
+
+The earlier rule advanced such a page, which cost three things: the broken page overwrote the last real content that later stages need once the site recovers, it became its own baseline so content collapse fired once and then compared the wall against itself, and a Firecrawl render that returned nothing was classified as a failure the content checks never saw. The cost of the current rule is that a false-positive error signature freezes a page's snapshot until the pattern is corrected, which is loud rather than silent.
 
 A per-source staleness figure is reported in the run report but does not alert. Scholarship pages legitimately go six to twelve months unchanged, so any configured cadence would either never fire or cry wolf, and there is no data to tune fourteen of them against.
 

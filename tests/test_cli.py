@@ -122,16 +122,24 @@ def test_the_report_carries_a_staleness_figure_without_alerting(tmp_path):
 def test_a_stored_error_page_alerts_on_the_second_run_through_fetch_all(tmp_path):
     """The ordering guard, tested where the ordering actually lives.
 
-    SPEC 3.1 argues health checks must precede the skip gate because a broken
-    source is unchanged after its first broken fetch. That argument is about
-    fetch_all: check_page is stateless, so testing it alone proves only that
-    it ignores the gate, which is trivially true. What can regress is the order
-    of the calls in this function, and only a run through fetch_all catches it.
+    SPEC 3.1 requires health checks to precede the skip gate. Since ruling R14 a
+    page the check calls broken is never stored, so the gate can only see an
+    unchanged broken page when the stored snapshot was already broken before
+    anything flagged it: written before a new signature was added, or before
+    this rule existed. The acceptance run left exactly such a snapshot behind.
+    That page is unchanged every week, and an alarm behind the gate would never
+    fire for it.
 
-    Run one stores the error page. Run two fetches the same error page, so the
-    change gate reports unchanged and would end the page's pipeline. The alert
-    must still be there.
+    So the error page is seeded into the store directly, as history would have
+    left it, and one run over the same page must still alert.
     """
+    from scholarship_watchdog.fetch.snapshots import advance
+
+    body = (
+        "# Access Denied\n\nYou do not have permission to access "
+        "this resource on this server. Reference #18.7c2d1502."
+    )
+    advance(PUBLIC_WATCH, PUBLIC_WATCH.url, body, repo_root=tmp_path)
 
     class ErrorPage:
         name = "httpx"
@@ -140,22 +148,15 @@ def test_a_stored_error_page_alerts_on_the_second_run_through_fetch_all(tmp_path
             return FetchResult(
                 source_id=source.id,
                 page_url=page_url,
-                markdown=(
-                    "# Access Denied\n\nYou do not have permission to access "
-                    "this resource on this server. Reference #18.7c2d1502."
-                ),
+                markdown=body,
                 status="ok",
                 fetched_at=datetime.now(UTC),
                 http_status=200,
             )
 
-    first = fetch_all([PUBLIC_WATCH], fetchers={"httpx": ErrorPage()}, repo_root=tmp_path)
-    assert any(a.check == "error_signature" for a in first.alerts)
-    assert first.pages[0].change.changed is True
-
-    second = fetch_all([PUBLIC_WATCH], fetchers={"httpx": ErrorPage()}, repo_root=tmp_path)
-    assert second.pages[0].change.changed is False, "precondition: run two sees no change"
-    assert any(a.check == "error_signature" for a in second.alerts), (
+    run = fetch_all([PUBLIC_WATCH], fetchers={"httpx": ErrorPage()}, repo_root=tmp_path)
+    assert run.pages[0].change.changed is False, "precondition: the gate sees no change"
+    assert any(a.check == "error_signature" for a in run.alerts), (
         "the health check ran after the skip gate and is now unfireable"
     )
 
@@ -253,7 +254,7 @@ def test_a_malformed_private_config_exits_cleanly_without_a_traceback(tmp_path, 
     assert "sources.local.yaml" in captured.err
 
 
-def test_an_error_page_with_a_rotating_token_is_not_reported_as_a_change(tmp_path):
+def test_an_error_page_with_a_rotating_token_is_reported_changed_and_broken(tmp_path):
     """Measured live on 2026-09-14, docs/p1-acceptance.md.
 
     An Imperva block regenerates its incident ID on every request, so the
@@ -367,3 +368,94 @@ def test_a_watch_page_that_404s_every_week_alerts_through_the_real_pipeline(tmp_
         run = fetch_all([PUBLIC_WATCH], fetchers={"httpx": moved}, repo_root=tmp_path)
         checks.append([a.check for a in run.alerts])
     assert checks == [[], ["skipped_twice"], ["skipped_twice"]]
+
+
+class Sequence:
+    """Serves the given bodies in order, one per run, as HTTP 200."""
+
+    name = "httpx"
+
+    def __init__(self, *bodies):
+        self._bodies = list(bodies)
+
+    def fetch(self, source, page_url):
+        return FetchResult(
+            source_id=source.id,
+            page_url=page_url,
+            markdown=self._bodies.pop(0),
+            status="ok",
+            fetched_at=datetime.now(UTC),
+            http_status=200,
+        )
+
+
+GOOD = "Application deadline: 1 October 2027. " + "The programme funds graduate study. " * 100
+
+
+def _stored(tmp_path, source):
+    from scholarship_watchdog.fetch.snapshots import read_previous
+
+    return read_previous(source, source.url, repo_root=tmp_path).previous_markdown
+
+
+def test_a_broken_page_keeps_the_last_good_snapshot_and_alerts_every_run(tmp_path):
+    """Ruling R14: a page the health check calls broken is treated like a failed
+    fetch. Storing it overwrote the last real content, which P2 needs to
+    re-extract from once the site recovers."""
+    fetcher = Sequence(GOOD, "Access Denied.", "Access Denied.")
+    fetch_all([PUBLIC_WATCH], fetchers={"httpx": fetcher}, repo_root=tmp_path)
+    for week in (2, 3):
+        run = fetch_all([PUBLIC_WATCH], fetchers={"httpx": fetcher}, repo_root=tmp_path)
+        assert [a.check for a in run.alerts] == ["error_signature"], f"week {week}"
+        assert run.pages[0].broken is True
+        assert run.pages[0].advanced is False
+        assert _stored(tmp_path, PUBLIC_WATCH) == GOOD, f"week {week}: good copy kept"
+
+
+def test_content_collapse_alerts_every_week_rather_than_once(tmp_path):
+    """The collapsed page used to become the new baseline, so the check fired in
+    week two and was silent from week three onwards. An unrecognised bot wall
+    on a discover source got exactly one digest line."""
+    wall = "Please wait while we check your connection. Ref 12345."
+    fetcher = Sequence(GOOD, wall, wall, wall)
+    fetch_all([PUBLIC_DISCOVER], fetchers={"httpx": fetcher}, repo_root=tmp_path)
+    for week in (2, 3, 4):
+        run = fetch_all([PUBLIC_DISCOVER], fetchers={"httpx": fetcher}, repo_root=tmp_path)
+        assert [a.check for a in run.alerts] == ["content_collapse"], f"week {week}"
+        assert run.pages[0].broken is True, "a collapsed page is not content either"
+        assert _stored(tmp_path, PUBLIC_DISCOVER) == GOOD
+
+
+def test_a_page_that_recovers_advances_normally(tmp_path):
+    fetcher = Sequence(GOOD, "Access Denied.", GOOD + " Updated.")
+    for _ in range(3):
+        run = fetch_all([PUBLIC_WATCH], fetchers={"httpx": fetcher}, repo_root=tmp_path)
+    assert run.alerts == []
+    assert run.pages[0].advanced is True
+    assert _stored(tmp_path, PUBLIC_WATCH) == GOOD + " Updated."
+
+
+def test_an_empty_firecrawl_render_alerts_every_run_like_an_empty_httpx_page(tmp_path):
+    """Both fetchers must treat the same symptom the same way. Firecrawl used
+    to return failed for an empty render, which raised nothing at all, while
+    the identical shell over httpx raised error_signature."""
+    import httpx
+
+    from scholarship_watchdog.fetch.firecrawl_fetcher import FirecrawlFetcher
+
+    source = Source(
+        id="nus", name="NUS", role="discover", url="https://n.example/", fetcher="firecrawl"
+    )
+    empty = FirecrawlFetcher(
+        api_key="fc-test",
+        client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda r: httpx.Response(200, json={"success": True, "data": {"markdown": "  "}})
+            )
+        ),
+        sleep=lambda s: None,
+    )
+    for week in (1, 2):
+        run = fetch_all([source], fetchers={"firecrawl": empty}, repo_root=tmp_path)
+        assert "error_signature" in [a.check for a in run.alerts], f"week {week}"
+        assert run.pages[0].advanced is False
