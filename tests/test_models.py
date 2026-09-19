@@ -166,3 +166,18 @@ def test_a_rejected_source_value_is_not_echoed_in_the_error():
     assert "ZZ-SECRET-COMMISSION" in str(exc.errors())
     assert "ZZ-SECRET-COMMISSION" in exc.json()
     assert "ZZ-SECRET-COMMISSION" not in str(safe_errors(exc))
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://[broken/p",
+        "ftp://example.org/x",
+        "file:///etc/passwd",
+        "example.org/no-scheme",
+        "https:///no-host",
+    ],
+)
+def test_a_source_url_must_be_an_http_url_with_a_host(url):
+    with pytest.raises(ValidationError):
+        Source(id="s", name="S", role="watch", url=url)

@@ -11,8 +11,9 @@ from __future__ import annotations
 
 from datetime import date
 from typing import Literal, Self
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 Role = Literal["watch", "discover"]
 FetcherName = Literal["httpx", "firecrawl"]
@@ -133,6 +134,24 @@ class Source(Strict):
             "artifact produced from it is private; see SPEC.md section 5."
         ),
     )
+
+    @field_validator("url")
+    @classmethod
+    def _http_url_with_a_host(cls, url: str) -> str:
+        """Reject a URL at load time rather than mid-run.
+
+        A URL that will not parse used to crash the run when its snapshot path
+        was built, long after loading, and outside any handler. Refusing non-http
+        schemes also keeps `file://` and friends out of the fetchers, which
+        matters from P4, when promoted URLs come from pages the project scraped.
+        """
+        try:
+            parts = urlsplit(url)
+        except ValueError:
+            raise ValueError("url does not parse") from None
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            raise ValueError("url must be http or https and name a host")
+        return url
 
     @property
     def is_watch(self) -> bool:

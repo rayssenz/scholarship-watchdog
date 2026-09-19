@@ -61,21 +61,58 @@ def _safe_detail(exc: ValidationError, *, private: bool) -> str:
     `safe_errors` strips the rejected value, which is the fix Ruling R11 added
     after `hide_input_in_errors` turned out to cover only the string form. It
     does not strip `loc`, and over a private file a field name is itself a fact
-    about the private registry, so the private branch reports a count alone.
+    about the private registry. So is the number of rejected fields, which is
+    why the private branch says nothing beyond "invalid".
     """
     errors = safe_errors(exc)
     if private:
-        return f"{len(errors)} invalid field(s)"
+        return "invalid"
     return "; ".join(f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in errors)
 
 
 def _read(path: Path) -> dict[str, Any]:
+    """Parse one YAML file into a mapping, or raise a ConfigError that quotes
+    nothing from it.
+
+    Every exception is caught, not a list of expected ones. The first version
+    caught YAMLError, UnicodeDecodeError and OSError, and a `!!int` tag over a
+    non-number still escaped: the conversion runs inside safe_load and raises
+    ValueError, whose message is the raw value. A list of exceptions is the same
+    mistake as a list of leaks.
+    """
     if not path.exists():
         return {}
     try:
-        return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except (yaml.YAMLError, UnicodeDecodeError, OSError) as exc:
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001 - every type is caught on purpose, see docstring
         raise ConfigError(f"{path.name} could not be parsed ({type(exc).__name__})") from None
+    if document is None:
+        return {}
+    if not isinstance(document, dict):
+        raise ConfigError(f"{path.name} must be a mapping at the top level")
+    return document
+
+
+_REGISTRY_KEYS = frozenset({"defaults", "sources"})
+
+
+def _registry_shape(document: dict[str, Any], filename: str, *, private: bool) -> None:
+    """Reject a registry file whose envelope is wrong, before any entry is read.
+
+    Only entries used to be validated. `source:` for `sources:` therefore loaded
+    zero sources with no error and produced a successful, empty weekly run,
+    which is every watch disabled in silence. An unknown key in a private file is
+    not named, because the user typed it and it may say anything.
+    """
+    unknown = set(document) - _REGISTRY_KEYS
+    if unknown:
+        named = "" if private else f": {', '.join(sorted(unknown))}"
+        raise ConfigError(f"{filename} has an unknown top-level key{named}")
+    if not isinstance(document.get("defaults") or {}, dict):
+        raise ConfigError(f"{filename}: defaults must be a mapping")
+    entries = document.get("sources") or []
+    if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
+        raise ConfigError(f"{filename}: sources must be a list of mappings")
 
 
 def load_sources(config_dir: Path) -> list[Source]:
@@ -85,8 +122,9 @@ def load_sources(config_dir: Path) -> list[Source]:
 
     for filename in (PUBLIC_SOURCES, *_PRIVATE_FILES):
         document = _read(config_dir / filename)
-        defaults = document.get("defaults") or {}
         private = filename in _PRIVATE_FILES
+        _registry_shape(document, filename, private=private)
+        defaults = document.get("defaults") or {}
 
         for entry in document.get("sources") or []:
             merged = {**defaults, **entry, "private": private}
@@ -97,14 +135,17 @@ def load_sources(config_dir: Path) -> list[Source]:
                     f"{filename} has an invalid entry: {_safe_detail(exc, private=private)}"
                 ) from None
             if source.id in seen:
-                # An id seen first in the public file is public and may be named.
-                # One that appears only in private files is itself private.
-                first_file = seen[source.id]
-                names_it = first_file == PUBLIC_SOURCES
-                subject = f"source id {source.id!r}" if names_it else "a source id"
-                raise DuplicateSourceIdError(
-                    f"{subject} appears in both {first_file} and {filename}"
-                )
+                # Named only when nothing private is involved. A public id next
+                # to a private file says "this public programme is in the user's
+                # private registry", which from P4 means it was promoted, which
+                # means it cleared the fitness gate: SPEC 5's third leak, rebuilt
+                # out of an error message. Naming the private file alone still
+                # says which private list grew.
+                if private:
+                    raise DuplicateSourceIdError(
+                        "a source id is duplicated across the registry files; check the local files"
+                    )
+                raise DuplicateSourceIdError(f"source id {source.id!r} appears twice in {filename}")
             seen[source.id] = filename
             sources.append(source)
 

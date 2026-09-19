@@ -99,6 +99,24 @@ def test_a_duplicate_id_across_files_raises(tmp_path):
         "sources:\n  - id: daad-study-scholarship\n    name: Shadow\n"
         "    role: watch\n    url: https://example.org/shadow\n",
     )
+    with pytest.raises(DuplicateSourceIdError) as caught:
+        load_sources(tmp_path)
+    # The id is public, but naming it next to a private file says "this public
+    # programme is in the user's private registry", which from P4 means "this
+    # programme was promoted", which means "it cleared the fitness gate". That
+    # is SPEC 5's third leak, rebuilt out of an error message.
+    assert "daad-study-scholarship" not in str(caught.value)
+    assert "sources.local.yaml" not in str(caught.value)
+
+
+def test_a_duplicate_id_within_the_public_file_is_still_named(tmp_path):
+    """Nothing private is involved, so the message stays debuggable."""
+    _write(
+        tmp_path,
+        "sources.yaml",
+        PUBLIC + "\n  - id: daad-study-scholarship\n"
+        "    name: Again\n    role: watch\n    url: https://example.org/again\n",
+    )
     with pytest.raises(DuplicateSourceIdError, match="daad-study-scholarship"):
         load_sources(tmp_path)
 
@@ -199,8 +217,6 @@ def test_a_duplicate_id_between_two_private_files_withholds_the_id(tmp_path):
         load_sources(tmp_path)
 
     assert "fulbright-xx-commission" not in str(caught.value)
-    assert "sources.local.yaml" in str(caught.value)
-    assert "watched.local.yaml" in str(caught.value)
 
 
 def test_an_invalid_private_entry_reports_no_field_names_or_values(tmp_path):
@@ -259,3 +275,87 @@ def test_a_malformed_profile_does_not_quote_its_contents(tmp_path):
     rendered = f"{caught.value}{caught.value.__cause__ or ''}"
     assert "QQ" not in rendered
     assert "citizenship" not in rendered
+
+
+def test_a_yaml_tag_that_fails_to_convert_does_not_quote_the_value(tmp_path):
+    """Found by the cross-model review. `!!int` runs a constructor inside
+    safe_load, and its ValueError is not a YAMLError, so it escaped the first
+    ConfigError fix and printed the raw value in the traceback."""
+    _write(tmp_path, "sources.yaml", PUBLIC)
+    _write(tmp_path, "sources.local.yaml", "sources:\n  - id: !!int private-country-QQ\n")
+    with pytest.raises(ConfigError) as caught:
+        load_sources(tmp_path)
+    assert "private-country-QQ" not in f"{caught.value}{caught.value.__cause__ or ''}"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "- just\n- a list\n",
+        "sources:\n  - just-a-string\n",
+        "sources: not-a-list\n",
+        "defaults: [1, 2]\nsources: []\n",
+    ],
+)
+def test_a_registry_file_of_the_wrong_shape_is_a_config_error(tmp_path, body):
+    """These used to escape as AttributeError or TypeError, past the CLI's
+    clean exit."""
+    _write(tmp_path, "sources.yaml", PUBLIC)
+    _write(tmp_path, "sources.local.yaml", body)
+    with pytest.raises(ConfigError):
+        load_sources(tmp_path)
+
+
+def test_an_unknown_top_level_key_is_rejected_rather_than_ignored(tmp_path):
+    """`source:` for `sources:` used to load zero sources without error and
+    produce a successful, empty weekly run: every watch disabled, silently."""
+    _write(tmp_path, "sources.yaml", PUBLIC.replace("sources:", "source:"))
+    with pytest.raises(ConfigError, match="source"):
+        load_sources(tmp_path)
+
+
+def test_an_unknown_top_level_key_in_a_private_file_is_not_named(tmp_path):
+    _write(tmp_path, "sources.yaml", PUBLIC)
+    _write(tmp_path, "sources.local.yaml", "embassy_notes: []\nsources: []\n")
+    with pytest.raises(ConfigError) as caught:
+        load_sources(tmp_path)
+    assert "embassy_notes" not in str(caught.value)
+
+
+def test_a_private_validation_error_reports_no_count(tmp_path):
+    """Even the number of rejected fields is a fact about the private file."""
+    _write(tmp_path, "sources.yaml", PUBLIC)
+    _write(tmp_path, "sources.local.yaml", "sources:\n  - id: c\n    bogus: 1\n")
+    with pytest.raises(ConfigError) as caught:
+        load_sources(tmp_path)
+    assert not any(ch.isdigit() for ch in str(caught.value))
+
+
+def test_a_private_entry_cannot_declare_itself_public(tmp_path):
+    """Which file an entry came from decides `private`, and nothing else can.
+    An entry saying `private: false`, or a `defaults` block saying so, must lose,
+    or a local source would be routed to the public snapshot tree."""
+    _write(tmp_path, "sources.yaml", PUBLIC)
+    _write(
+        tmp_path,
+        "sources.local.yaml",
+        "defaults:\n  private: false\nsources:\n  - id: c\n    name: C\n"
+        "    role: watch\n    url: https://example.org/c\n    private: false\n",
+    )
+    local = next(s for s in load_sources(tmp_path) if s.id == "c")
+    assert local.private is True
+
+
+def test_a_malformed_url_is_rejected_at_load_time(tmp_path):
+    """A URL that will not parse used to crash the run when the snapshot path
+    was built, long after loading. It is a config error, reported as one, and a
+    private file's URL is not quoted."""
+    _write(tmp_path, "sources.yaml", PUBLIC)
+    _write(
+        tmp_path,
+        "sources.local.yaml",
+        "sources:\n  - id: c\n    name: C\n    role: watch\n    url: http://[embassy-QQ/p\n",
+    )
+    with pytest.raises(ConfigError) as caught:
+        load_sources(tmp_path)
+    assert "embassy-QQ" not in f"{caught.value}{caught.value.__cause__ or ''}"
