@@ -295,6 +295,13 @@ def test_a_yaml_tag_that_fails_to_convert_does_not_quote_the_value(tmp_path):
         "sources:\n  - just-a-string\n",
         "sources: not-a-list\n",
         "defaults: [1, 2]\nsources: []\n",
+        # Falsy values of the wrong type used to be replaced by an empty default
+        # before their type was checked, so each of these loaded zero sources.
+        "sources: false\n",
+        "sources: {}\n",
+        "defaults: []\nsources: []\n",
+        "sources:\n  - {123: QQ}\n",
+        "defaults: {1: QQ}\nsources: []\n",
     ],
 )
 def test_a_registry_file_of_the_wrong_shape_is_a_config_error(tmp_path, body):
@@ -359,3 +366,24 @@ def test_a_malformed_url_is_rejected_at_load_time(tmp_path):
     with pytest.raises(ConfigError) as caught:
         load_sources(tmp_path)
     assert "embassy-QQ" not in f"{caught.value}{caught.value.__cause__ or ''}"
+
+
+def test_an_empty_or_false_public_registry_is_a_config_error(tmp_path):
+    """`sources: {}` in the public file used to load zero sources, exit 0 and
+    write a report with nothing in it: every watch gone, silently."""
+    for body in ("sources: false\n", "sources: {}\n"):
+        _write(tmp_path, "sources.yaml", body)
+        with pytest.raises(ConfigError):
+            load_sources(tmp_path)
+
+
+def test_a_url_that_is_not_valid_text_is_rejected_at_load_time(tmp_path):
+    """A lone surrogate passed the URL check, then crashed the run when the
+    snapshot path was built, outside any handler."""
+    _write(
+        tmp_path,
+        "sources.yaml",
+        'sources:\n  - {id: s, name: S, role: watch, url: "https://example.org/\\uD800"}\n',
+    )
+    with pytest.raises(ConfigError):
+        load_sources(tmp_path)

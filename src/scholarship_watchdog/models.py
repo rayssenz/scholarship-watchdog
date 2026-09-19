@@ -146,9 +146,12 @@ class Source(Strict):
         matters from P4, when promoted URLs come from pages the project scraped.
         """
         try:
+            url.encode("utf-8")
             parts = urlsplit(url)
         except ValueError:
-            raise ValueError("url does not parse") from None
+            # UnicodeEncodeError is a ValueError. A lone surrogate passed the
+            # check below and crashed the run later, hashing the snapshot path.
+            raise ValueError("url does not parse as text") from None
         if parts.scheme not in ("http", "https") or not parts.hostname:
             raise ValueError("url must be http or https and name a host")
         return url

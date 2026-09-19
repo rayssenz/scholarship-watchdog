@@ -108,11 +108,23 @@ def _registry_shape(document: dict[str, Any], filename: str, *, private: bool) -
     if unknown:
         named = "" if private else f": {', '.join(sorted(unknown))}"
         raise ConfigError(f"{filename} has an unknown top-level key{named}")
-    if not isinstance(document.get("defaults") or {}, dict):
-        raise ConfigError(f"{filename}: defaults must be a mapping")
-    entries = document.get("sources") or []
-    if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
-        raise ConfigError(f"{filename}: sources must be a list of mappings")
+    # Types are checked on the values as written, before any default applies.
+    # `document.get("sources") or []` used to turn `sources: false` or
+    # `sources: {}` into an empty list first, so both loaded zero sources.
+    defaults = document.get("defaults")
+    if defaults is not None and not _string_keyed(defaults):
+        raise ConfigError(f"{filename}: defaults must be a mapping with text keys")
+    entries = document.get("sources")
+    if entries is not None and not (
+        isinstance(entries, list) and all(_string_keyed(e) for e in entries)
+    ):
+        raise ConfigError(f"{filename}: sources must be a list of mappings with text keys")
+
+
+def _string_keyed(value: object) -> bool:
+    """A mapping whose keys can be keyword arguments. A YAML key such as `123`
+    loads as an int and made Source(**entry) raise TypeError past every handler."""
+    return isinstance(value, dict) and all(isinstance(k, str) for k in value)
 
 
 def load_sources(config_dir: Path) -> list[Source]:
