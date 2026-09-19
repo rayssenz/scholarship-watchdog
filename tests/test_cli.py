@@ -459,3 +459,49 @@ def test_an_empty_firecrawl_render_alerts_every_run_like_an_empty_httpx_page(tmp
         run = fetch_all([source], fetchers={"firecrawl": empty}, repo_root=tmp_path)
         assert "error_signature" in [a.check for a in run.alerts], f"week {week}"
         assert run.pages[0].advanced is False
+
+
+def test_an_exception_inside_one_fetch_does_not_end_the_run(tmp_path):
+    """Any exception a fetcher raises becomes a failed result for that source.
+
+    The reviews constructed several: a malformed URL (`urlsplit` raises
+    ValueError, httpx raises InvalidURL, neither an HTTPError), an unknown
+    charset (LookupError carrying the charset name), a malformed link in
+    canonicalisation. Each one used to abort the loop before the ledger and the
+    report were written. The message is dropped, because it can quote the page
+    or the private registry entry that caused it; the type name is kept.
+    """
+
+    class Exploding:
+        name = "httpx"
+
+        def fetch(self, source, page_url):
+            if source.id == PUBLIC_WATCH.id:
+                raise LookupError("unknown encoding: private-QQ")
+            return RecordingFetcher().fetch(source, page_url)
+
+    run = fetch_all(
+        [PUBLIC_WATCH, PUBLIC_DISCOVER], fetchers={"httpx": Exploding()}, repo_root=tmp_path
+    )
+    by_id = {p.source.id: p for p in run.pages}
+    assert by_id["daad-study"].result.status == "failed"
+    assert by_id["daad-study"].result.reason == "LookupError"
+    assert by_id["mext"].result.status == "ok", "the next source is still fetched"
+    assert (tmp_path / "data" / "health.json").exists(), "the ledger is still saved"
+
+
+def test_a_url_httpx_rejects_fails_one_source_not_the_run(tmp_path):
+    import httpx
+
+    from scholarship_watchdog.fetch.httpx_fetcher import HttpxFetcher
+
+    # Parses as a URL, so it survives to the fetch, where httpx rejects it with
+    # InvalidURL, which is not an HTTPError and escaped the fetcher's own handling.
+    broken = Source(id="broken", name="B", role="watch", url="https://not-a-host.example/p\x00q")
+    real = HttpxFetcher(
+        client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(404))),
+        sleep=lambda s: None,
+    )
+    run = fetch_all([broken, PUBLIC_WATCH], fetchers={"httpx": real}, repo_root=tmp_path)
+    assert [p.result.status for p in run.pages] == ["failed", "failed"]
+    assert "not-a-host" not in (run.pages[0].result.reason or "")

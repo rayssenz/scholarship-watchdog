@@ -71,6 +71,31 @@ def _fetch_order(sources: list[Source]) -> list[Source]:
     return [s for s in sources if s.is_watch] + [s for s in sources if s.is_discover]
 
 
+def _fetch_contained(fetcher: Fetcher, source: Source) -> FetchResult:
+    """One source's fetch, with any exception turned into a failed result.
+
+    The fetchers classify the failures they expect. This catches the rest: a
+    malformed registry URL, an unknown charset, a link that will not parse. Any
+    of them used to end the loop before the skip ledger was saved and before the
+    run report was written, so one bad page cost the whole week.
+
+    Only the exception's type survives. Its message can quote the page, or the
+    private registry entry that caused it, and a traceback on stderr is a public
+    Actions log from P3 (SPEC.md section 5).
+    """
+    try:
+        return fetcher.fetch(source, source.url)
+    except Exception as exc:  # noqa: BLE001 - containment is the point, see docstring
+        return FetchResult(
+            source_id=source.id,
+            page_url=source.url,
+            markdown=None,
+            status="failed",
+            fetched_at=datetime.now(UTC),
+            reason=type(exc).__name__,
+        )
+
+
 def fetch_all(
     sources: list[Source],
     *,
@@ -93,7 +118,7 @@ def fetch_all(
                 reason=f"no {source.fetcher} fetcher configured",
             )
         else:
-            result = fetcher.fetch(source, source.url)
+            result = _fetch_contained(fetcher, source)
 
         skip_alert = ledger.record(source, result)
         if skip_alert is not None:
