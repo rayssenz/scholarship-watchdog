@@ -68,6 +68,17 @@ def render_alerts(run: FetchRun) -> list[str]:
     ]
 
 
+def exit_code(run: FetchRun) -> int:
+    """Non-zero when a public source alerted, and for no other reason.
+
+    From P3 the job's red or green status is public. Counting private alerts
+    here turned it into a weekly signal that some private page broke, which is
+    the fact render_alerts withholds. Private breakage reaches the email digest.
+    """
+    private = _private_ids(run)
+    return 1 if any(a.source_id not in private for a in run.alerts) else 0
+
+
 def _build_fetchers() -> dict[str, object]:
     """Firecrawl is built with whatever key is present, including none.
 
@@ -111,7 +122,7 @@ def _fetch(args: argparse.Namespace) -> int:
         print(line, file=sys.stderr)
 
     print(f"\nrun report: {path}")
-    return 1 if run.alerts else 0
+    return exit_code(run)
 
 
 def main(argv: list[str] | None = None) -> int:

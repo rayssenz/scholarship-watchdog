@@ -505,3 +505,60 @@ def test_a_url_httpx_rejects_fails_one_source_not_the_run(tmp_path):
     run = fetch_all([broken, PUBLIC_WATCH], fetchers={"httpx": real}, repo_root=tmp_path)
     assert [p.result.status for p in run.pages] == ["failed", "failed"]
     assert "not-a-host" not in (run.pages[0].result.reason or "")
+
+
+def test_the_exit_code_depends_on_public_sources_only(tmp_path):
+    """From P3 the job's red or green status is public. A non-zero exit caused
+    by a private page is a weekly "some private page broke" signal, the same
+    one render_alerts was fixed to withhold. Found by two reviewers."""
+    from scholarship_watchdog.cli import exit_code
+
+    healthy_public_broken_private = fetch_all(
+        [PUBLIC_WATCH, PRIVATE_WATCH],
+        fetchers={"httpx": Selective(broken={PRIVATE_WATCH.id})},
+        repo_root=tmp_path / "a",
+    )
+    assert healthy_public_broken_private.alerts, "precondition: the private page did alert"
+    assert exit_code(healthy_public_broken_private) == 0
+
+    broken_public = fetch_all(
+        [PUBLIC_WATCH],
+        fetchers={"httpx": Selective(broken={PUBLIC_WATCH.id})},
+        repo_root=tmp_path / "b",
+    )
+    assert exit_code(broken_public) == 1
+
+
+def test_the_run_report_carries_no_private_alert(tmp_path):
+    """The page filter had a test; the alert filter beside it did not, and
+    replacing it with `if True` left all 142 tests green."""
+    run = fetch_all(
+        [PUBLIC_WATCH, PRIVATE_WATCH],
+        fetchers={"httpx": Selective(broken={PRIVATE_WATCH.id})},
+        repo_root=tmp_path,
+    )
+    assert any(a.source_id == PRIVATE_WATCH.id for a in run.alerts), "precondition"
+    started = datetime.now(UTC)
+    report = build_run_report(run, started_at=started, finished_at=started, repo_root=tmp_path)
+    assert report["alerts"] == []
+    assert PRIVATE_WATCH.id not in json.dumps(report)
+
+
+class Selective:
+    """Serves a healthy watch page, or Access Denied for the ids named broken."""
+
+    name = "httpx"
+
+    def __init__(self, broken):
+        self._broken = broken
+
+    def fetch(self, source, page_url):
+        body = "Access Denied." if source.id in self._broken else GOOD
+        return FetchResult(
+            source_id=source.id,
+            page_url=page_url,
+            markdown=body,
+            status="ok",
+            fetched_at=datetime.now(UTC),
+            http_status=200,
+        )

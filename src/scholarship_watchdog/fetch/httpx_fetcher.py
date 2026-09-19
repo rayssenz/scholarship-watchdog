@@ -48,6 +48,12 @@ class HttpxFetcher:
         self._last_request_at: dict[str, float] = {}
 
     def fetch(self, source: Source, page_url: str) -> FetchResult:
+        # One client serves every source, private ones first, and it keeps a
+        # cookie jar. Left alone, a cookie a private page set rides along on the
+        # next public request, so a public snapshot could change with the private
+        # registry (SPEC.md section 5). Every fetch starts with an empty jar;
+        # cookies set during one fetch's redirect chain still apply within it.
+        self._client.cookies.clear()
         self._wait_for_host(page_url, source.rate_limit_seconds)
         status, text, failure = self._get_with_retries(page_url)
 

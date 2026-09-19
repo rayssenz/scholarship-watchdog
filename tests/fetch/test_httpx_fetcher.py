@@ -190,3 +190,26 @@ def test_an_oversized_body_is_abandoned_rather_than_drained():
 
     assert result.status == "failed"
     assert len(produced) < 20, f"drained {len(produced)} chunks of a 1000-chunk body"
+
+
+def test_no_cookie_set_while_fetching_one_source_reaches_the_next():
+    """One client serves every source, private ones included, and they are
+    fetched first. A cookie a private page set was sent with the next public
+    request, so a public snapshot could change with the private registry, which
+    is exactly what SPEC 5's invariant forbids. Found by two reviewers."""
+    seen = []
+
+    def handler(request):
+        seen.append((request.url.path, request.headers.get("cookie")))
+        if request.url.path == "/private":
+            return httpx.Response(200, html="ok", headers={"Set-Cookie": "country=QQ; Path=/"})
+        return httpx.Response(200, html="ok")
+
+    fetcher, _ = _fetcher(handler)
+    private = Source(
+        id="p", name="P", role="watch", url="https://host.example/private", private=True
+    )
+    public = Source(id="q", name="Q", role="watch", url="https://host.example/public")
+    fetcher.fetch(private, private.url)
+    fetcher.fetch(public, public.url)
+    assert seen == [("/private", None), ("/public", None)]
