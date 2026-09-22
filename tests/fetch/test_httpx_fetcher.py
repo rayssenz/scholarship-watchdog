@@ -196,7 +196,7 @@ def test_no_cookie_set_while_fetching_one_source_reaches_the_next():
     """One client serves every source, private ones included, and they are
     fetched first. A cookie a private page set was sent with the next public
     request, so a public snapshot could change with the private registry, which
-    is exactly what SPEC 5's invariant forbids. Found by two reviewers."""
+    is exactly what SPEC 5's invariant forbids."""
     seen = []
 
     def handler(request):
@@ -225,7 +225,7 @@ def _portal(links):
 
 
 def test_a_redirect_body_is_abandoned_rather_than_drained():
-    """Found by the cross-model review. httpx reads each intermediate redirect's
+    """httpx reads each intermediate redirect's
     body in full before yielding the final response, so the byte cap never saw
     it: a 302 streaming a large body was drained completely and the fetch
     returned ok. The drain test only ever exercised a final 200."""
@@ -264,7 +264,7 @@ def test_a_redirect_to_a_non_http_url_is_not_followed():
 
 
 def test_links_on_a_redirected_page_resolve_against_where_the_page_ended_up():
-    """Found by the cross-model review. Canonicalisation used the requested URL
+    """Canonicalisation used the requested URL
     as its base, so `/start` redirecting to `/new/portal/` turned a relative
     link `p0` into `/p0` instead of `/new/portal/p0`: a candidate link to the
     wrong page, which P4 would then try to verify and promote."""

@@ -58,9 +58,9 @@ class ConfigError(ValueError):
 def _safe_detail(exc: ValidationError, *, private: bool) -> str:
     """What may be said about a rejected entry, given which file it came from.
 
-    `safe_errors` strips the rejected value, which is the fix Ruling R11 added
-    after `hide_input_in_errors` turned out to cover only the string form. It
-    does not strip `loc`, and over a private file a field name is itself a fact
+    `safe_errors` strips the rejected value. It exists because
+    `hide_input_in_errors` turned out to cover only the string form. It does
+    not strip `loc`, and over a private file a field name is itself a fact
     about the private registry. So is the number of rejected fields, which is
     why the private branch says nothing beyond "invalid".
     """

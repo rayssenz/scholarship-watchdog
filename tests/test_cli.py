@@ -122,8 +122,8 @@ def test_the_report_carries_a_staleness_figure_without_alerting(tmp_path):
 def test_a_stored_error_page_alerts_on_the_second_run_through_fetch_all(tmp_path):
     """The ordering guard, tested where the ordering actually lives.
 
-    SPEC 3.1 requires health checks to precede the skip gate. Since ruling R14 a
-    page the check calls broken is never stored, so the gate can only see an
+    SPEC 3.1 requires health checks to precede the skip gate. A page the check
+    calls broken is never stored, so the gate can only see an
     unchanged broken page when the stored snapshot was already broken before
     anything flagged it: written before a new signature was added, or before
     this rule existed. The acceptance run left exactly such a snapshot behind.
@@ -351,7 +351,7 @@ def test_the_run_report_does_not_mark_a_healthy_page_broken(tmp_path):
 
 
 def test_a_watch_page_that_404s_every_week_alerts_through_the_real_pipeline(tmp_path):
-    """The failure the review constructed, end to end with a real fetcher.
+    """A moved page, end to end with a real fetcher.
 
     Three weekly runs of a moved page used to produce three empty alert lists.
     """
@@ -399,7 +399,7 @@ def _stored(tmp_path, source):
 
 
 def test_a_broken_page_keeps_the_last_good_snapshot_and_alerts_every_run(tmp_path):
-    """Ruling R14: a page the health check calls broken is treated like a failed
+    """SPEC 3.1: a page the health check calls broken is treated like a failed
     fetch. Storing it overwrote the last real content, which P2 needs to
     re-extract from once the site recovers."""
     fetcher = Sequence(GOOD, "Access Denied.", "Access Denied.")
@@ -510,7 +510,7 @@ def test_a_url_httpx_rejects_fails_one_source_not_the_run(tmp_path):
 def test_the_exit_code_depends_on_public_sources_only(tmp_path):
     """From P3 the job's red or green status is public. A non-zero exit caused
     by a private page is a weekly "some private page broke" signal, the same
-    one render_alerts was fixed to withhold. Found by two reviewers."""
+    one render_alerts was fixed to withhold."""
     from scholarship_watchdog.cli import exit_code
 
     healthy_public_broken_private = fetch_all(
@@ -599,7 +599,7 @@ def _weeks(tmp_path, source, bodies):
 
 
 def test_a_page_that_really_shrank_is_adopted_after_three_identical_weeks(tmp_path):
-    """Ruling R17. A collapse used to freeze the page forever: a programme that
+    """SPEC 3.1. A collapse used to freeze the page forever: a programme that
     closed and trimmed its page alerted every week, and a later real update was
     never stored. A page that stays identical three weeks running is not a
     rotating wall, so on the third it becomes the new baseline, and that week's

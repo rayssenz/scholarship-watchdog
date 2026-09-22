@@ -160,7 +160,7 @@ def test_a_malformed_success_payload_is_failed():
 
 def test_an_empty_render_is_an_ok_page_with_no_text():
     """The same shape the httpx fetcher returns for a JavaScript shell, so one
-    health check covers both fetchers. Ruling R14 keeps it out of the snapshot
+    health check covers both fetchers. SPEC 3.1 keeps it out of the snapshot
     store; returning failed instead made it raise nothing at all."""
     for markdown in ("", "   "):
         payload = {"success": True, "data": {"markdown": markdown}}
@@ -192,7 +192,7 @@ def test_an_origin_error_behind_a_successful_render_is_failed():
     status in `data.metadata.statusCode` (checked against docs.firecrawl.dev on
     2026-09-19). Reading only the API status stored a maintenance page served
     with 503 as a good snapshot, contrary to SPEC 3.1's rule that HTTP 400 or
-    worse is a failure. Found by two reviewers."""
+    worse is a failure."""
     fetcher, _ = _fetcher(_rendered("Down for maintenance.", statusCode=503))
     result = fetcher.fetch(NUS, NUS.url)
     assert result.status == "failed"

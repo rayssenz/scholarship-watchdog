@@ -28,7 +28,7 @@ def test_a_record_without_a_program_is_rejected():
 def test_a_record_with_an_empty_program_is_rejected():
     """SPEC 3.2: program is the only model-produced component of the identity
     hash. An empty string would hash to a real, stable identity, silently
-    occupying an identity slot at Task 8's dual hashing."""
+    occupying an identity slot at the store's dual hashing (SPEC 3.2)."""
     with pytest.raises(ValidationError):
         ScholarshipRecord(**_minimal_record(program=""))
 

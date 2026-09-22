@@ -284,7 +284,7 @@ REAL_PAGE_WITH_FAQ = (
 
 
 def test_a_generic_error_phrase_inside_a_real_page_is_not_an_error_page():
-    """Ruling R18. A long, real page whose FAQ mentions "you do not have
+    """SPEC 3.1. A long, real page whose FAQ mentions "you do not have
     permission" used to raise error_signature, and since a broken page is never
     stored, it froze a good page and alerted every week. Real error pages are
     short; the generic phrases only count on short pages."""

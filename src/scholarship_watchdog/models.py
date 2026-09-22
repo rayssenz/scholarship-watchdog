@@ -58,7 +58,7 @@ def safe_errors(exc: ValidationError) -> list[dict]:
     both embed the raw value that failed validation regardless of that
     setting. For `Profile` and `Source`, that value can be a citizenship code
     or a private commission URL, so any code that reports a validation
-    failure over their input (Task 3's config loader, for one) must call this
+    failure over their input (the config loader, for one) must call this
     instead of `exc.errors()` to avoid putting it in a log or a public Actions
     run.
     """

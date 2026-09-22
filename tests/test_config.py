@@ -278,7 +278,7 @@ def test_a_malformed_profile_does_not_quote_its_contents(tmp_path):
 
 
 def test_a_yaml_tag_that_fails_to_convert_does_not_quote_the_value(tmp_path):
-    """Found by the cross-model review. `!!int` runs a constructor inside
+    """`!!int` runs a constructor inside
     safe_load, and its ValueError is not a YAMLError, so it escaped the first
     ConfigError fix and printed the raw value in the traceback."""
     _write(tmp_path, "sources.yaml", PUBLIC)

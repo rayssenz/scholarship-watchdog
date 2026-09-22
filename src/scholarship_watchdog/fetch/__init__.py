@@ -141,7 +141,7 @@ def fetch_all(
             continue
 
         # A page the health check calls broken is stored like a failed fetch:
-        # not at all. Ruling R14, SPEC 3.1. Storing it overwrote the last real
+        # not at all (SPEC 3.1). Storing it overwrote the last real
         # content, which later stages need once the site recovers, and made the
         # broken page its own baseline, so content_collapse fired once and then
         # compared the wall against itself forever.

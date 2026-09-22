@@ -118,7 +118,7 @@ class FirecrawlFetcher:
         # httpx fetcher returns a JavaScript shell that cleans to nothing. The
         # health check then calls it broken, it is never stored, and it alerts
         # every run. Returning `failed` here instead made it silent, because a
-        # page that did not arrive gets no content check. SPEC 3.1, ruling R14.
+        # page that did not arrive gets no content check. SPEC 3.1.
         return self._result(source, page_url, markdown, "ok", http_status=status)
 
     def _post_with_retries(self, page_url: str) -> tuple[int | None, str | None, str | None]:
