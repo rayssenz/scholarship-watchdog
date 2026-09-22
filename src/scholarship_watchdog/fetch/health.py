@@ -47,7 +47,9 @@ CheckName = Literal[
 
 COLLAPSE_RATIO = 0.4
 
-ERROR_SIGNATURES: tuple[re.Pattern[str], ...] = (
+SHORT_PAGE_CHARS = 1500
+
+GENERIC_ERRORS: tuple[re.Pattern[str], ...] = (
     re.compile(r"enable javascript", re.I),
     re.compile(r"access denied", re.I),
     re.compile(r"\b403 forbidden\b", re.I),
@@ -55,19 +57,25 @@ ERROR_SIGNATURES: tuple[re.Pattern[str], ...] = (
     re.compile(r"\b(500|502|503) (internal server error|bad gateway|service unavailable)\b", re.I),
     re.compile(r"you do not have permission", re.I),
     re.compile(r"request blocked", re.I),
-    # Bot walls, which are the common case for a university portal and are all
-    # served with HTTP 200. Added after the P1 acceptance run measured an
-    # Imperva block getting through every pattern above it: see
-    # docs/p1-acceptance.md. Each is matched on a phrase the vendor's own
-    # interstitial prints, not on a generic word, because a false positive here
-    # freezes the page's snapshot until the pattern is corrected.
-    re.compile(r"incapsula incident", re.I),
     re.compile(r"request unsuccessful", re.I),
+)
+"""Phrases an error page prints, but which real prose can also contain: an FAQ
+line such as "if the portal says you do not have permission" is ordinary
+content. They count only on a page shorter than SHORT_PAGE_CHARS, because an
+error page is short and a scholarship page is not, and a false positive freezes
+a good page's snapshot (SPEC.md section 3.1)."""
+
+BOT_WALLS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"incapsula incident", re.I),
     re.compile(r"attention required.{0,3}\| cloudflare", re.I),
     re.compile(r"checking your browser before accessing", re.I),
     re.compile(r"verify you are a human", re.I),
     re.compile(r"pardon our interruption", re.I),
 )
+"""Phrases a vendor's bot-wall interstitial prints and scholarship prose does
+not, so they count at any length. All of these walls answer HTTP 200. The first
+acceptance run measured an Imperva block whose whole body was "Request
+unsuccessful. Incapsula incident ID: ..." getting past every generic pattern."""
 
 
 @dataclass(frozen=True)
@@ -101,7 +109,8 @@ def check_page(source: Source, result: FetchResult, previous: PageState) -> list
             )
         ]
 
-    for pattern in ERROR_SIGNATURES:
+    patterns = BOT_WALLS + (GENERIC_ERRORS if len(markdown) < SHORT_PAGE_CHARS else ())
+    for pattern in patterns:
         if pattern.search(markdown):
             return [
                 Alert(source.id, "error_signature", f"fetched text matches {pattern.pattern!r}")

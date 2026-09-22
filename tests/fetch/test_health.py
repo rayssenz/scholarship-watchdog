@@ -273,3 +273,34 @@ def test_a_health_file_of_the_wrong_shape_resets_rather_than_crashing(tmp_path):
         failed = _result(WATCH, None, status="failed", reason="HTTP 404")
         assert ledger.record(WATCH, failed) is None, body
         assert ledger.record(WATCH, _result(WATCH, "content")) is None, body
+
+
+REAL_PAGE_WITH_FAQ = (
+    "# DAAD Study Scholarship\n\nApplication deadline: 1 March 2027.\n\n"
+    + "The scholarship funds a full master's programme at a German university. " * 30
+    + "\n\n## FAQ\n\nIf the portal says you do not have permission, log out and back in. "
+    "An access denied message usually means your session expired."
+)
+
+
+def test_a_generic_error_phrase_inside_a_real_page_is_not_an_error_page():
+    """Ruling R18. A long, real page whose FAQ mentions "you do not have
+    permission" used to raise error_signature, and since a broken page is never
+    stored, it froze a good page and alerted every week. Real error pages are
+    short; the generic phrases only count on short pages."""
+    assert len(REAL_PAGE_WITH_FAQ) > 1500
+    alerts = check_page(WATCH, _result(WATCH, REAL_PAGE_WITH_FAQ), _no_previous())
+    assert [a.check for a in alerts] == []
+
+
+def test_a_generic_error_phrase_on_a_short_page_still_alerts():
+    alerts = check_page(WATCH, _result(WATCH, "Access Denied. Reference #18.7c2d."), _no_previous())
+    assert [a.check for a in alerts] == ["error_signature"]
+
+
+def test_a_named_bot_wall_alerts_however_long_the_page():
+    """Vendor interstitial phrases do not appear in scholarship prose, so they
+    count at any length."""
+    body = REAL_PAGE_WITH_FAQ + "\n\nRequest unsuccessful. Incapsula incident ID: 12345-678"
+    alerts = check_page(WATCH, _result(WATCH, body), _no_previous())
+    assert [a.check for a in alerts] == ["error_signature"]

@@ -112,10 +112,10 @@ An unchanged page terminates the pipeline for that page. This is the primary cos
 | Check | Alerts when |
 | --- | --- |
 | Content collapse | cleaned markdown is under 40% of the previous snapshot |
-| Error signature | text matches "enable JavaScript", "Access Denied", a bare 4xx/5xx page, or a bot wall |
+| Error signature | the page is empty, names a vendor bot wall, or is short (under 1,500 characters) and matches a generic error phrase such as "Access Denied" or "enable JavaScript" |
 | Skipped source | a source is skipped twice running (missing Firecrawl key, repeated fetch failure) |
 
-Bot walls belong in that list because they are the common case for a university portal and they are all served with HTTP 200. The P1 acceptance run measured one getting past every other pattern: an Imperva block whose entire body was `Request unsuccessful. Incapsula incident ID: ...`. A `watch` source caught it only because the deadline check fired; a `discover` source blocked the same way would have passed silently.
+Bot walls belong in that list because they are the common case for a university portal and they are all served with HTTP 200. The P1 acceptance run measured one getting past every other pattern: an Imperva block whose entire body was `Request unsuccessful. Incapsula incident ID: ...`. A `watch` source caught it only because the deadline check fired; a `discover` source blocked the same way would have passed silently. Generic phrases are treated differently from vendor ones because real pages contain them too: a scholarship FAQ saying "if the portal says you do not have permission, log out" is content, and since a broken page is never stored, matching it would freeze a good page. Error pages are short and scholarship pages are not, so a generic phrase counts only on a short page, while a vendor's interstitial phrase counts at any length.
 
 **A page the error-signature or content-collapse check rejects is marked broken, and broken is not the same question as changed.** A bot wall regenerates its incident ID on every request, so its hash never settles: it is genuinely changed every run and is equally genuinely not new content. The hash therefore stays a truthful statement about the bytes, `broken` carries the judgement, and later stages read `broken` when deciding whether a page is worth extracting or notifying on. A page that merely lacks a deadline is not broken; it is real content that fails a different expectation.
 
