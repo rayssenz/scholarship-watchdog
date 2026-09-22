@@ -240,3 +240,12 @@ def test_no_cookie_from_one_scrape_reaches_the_next():
     fetcher.fetch(NUS, NUS.url)
     fetcher.fetch(CSC, CSC.url)
     assert seen == [None, None]
+
+
+def test_a_long_provider_error_is_cut_short_in_the_reason():
+    """The provider's error text goes into the committed run report and the
+    skip alert. It is the provider's to write, so its length is ours to bound."""
+    fetcher, _ = _fetcher(
+        lambda r: httpx.Response(200, json={"success": False, "error": "x" * 5000})
+    )
+    assert len(fetcher.fetch(NUS, NUS.url).reason) <= 200

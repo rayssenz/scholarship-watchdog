@@ -86,7 +86,9 @@ class FirecrawlFetcher:
             return failed(reason="response body was not a JSON object")
 
         if not payload.get("success"):
-            return failed(reason=str(payload.get("error", "firecrawl reported failure")))
+            # The provider writes this text and it reaches the committed report,
+            # so its length is bounded here.
+            return failed(reason=str(payload.get("error", "firecrawl reported failure"))[:200])
 
         data = payload.get("data")
         if not isinstance(data, dict):
