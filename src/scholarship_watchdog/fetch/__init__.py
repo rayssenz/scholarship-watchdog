@@ -212,8 +212,13 @@ def build_run_report(
         "started_at": started_at.isoformat(),
         "finished_at": finished_at.isoformat(),
         "pages_fetched": sum(1 for p in public if p.result.is_ok),
-        "pages_changed": sum(1 for p in public if p.change and p.change.changed),
-        "pages_unchanged": sum(1 for p in public if p.change and not p.change.changed),
+        # A broken page is changed by hash and is not content, so the totals
+        # count it once, as broken, the way the per-source rows already do.
+        "pages_changed": sum(1 for p in public if p.change and p.change.changed and not p.broken),
+        "pages_unchanged": sum(
+            1 for p in public if p.change and not p.change.changed and not p.broken
+        ),
+        "pages_broken": sum(1 for p in public if p.broken),
         "pages_skipped": sum(1 for p in public if p.result.status == "skipped"),
         "pages_failed": sum(1 for p in public if p.result.status == "failed"),
         "alerts": [

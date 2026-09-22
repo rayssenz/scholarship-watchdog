@@ -646,3 +646,17 @@ def test_a_private_page_keeps_its_adoption_note_private(tmp_path):
     _weeks(tmp_path, PRIVATE_WATCH, [GOOD, SHRUNK])
     assert list((tmp_path / ".private").rglob("*.pending.json"))
     assert not (tmp_path / "data").exists() or not list((tmp_path / "data").rglob("*.pending.json"))
+
+
+def test_the_report_counts_a_broken_page_as_broken_not_changed(tmp_path):
+    """A bot wall is changed by hash every run. The per-source row said broken,
+    but the totals counted it among pages_changed, so a reader of the totals
+    saw a content change that was not one."""
+    run = fetch_all(
+        [PUBLIC_WATCH, PUBLIC_DISCOVER],
+        fetchers={"httpx": Selective(broken={PUBLIC_WATCH.id})},
+        repo_root=tmp_path,
+    )
+    started = datetime.now(UTC)
+    report = build_run_report(run, started_at=started, finished_at=started, repo_root=tmp_path)
+    assert (report["pages_changed"], report["pages_unchanged"], report["pages_broken"]) == (1, 0, 1)
