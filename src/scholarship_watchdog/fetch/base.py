@@ -7,6 +7,7 @@ swappable and keeps the core runnable with no Firecrawl key at all.
 
 from __future__ import annotations
 
+import codecs
 from dataclasses import dataclass
 from datetime import datetime
 from typing import ClassVar, Literal, Protocol
@@ -83,4 +84,11 @@ def read_capped(response: httpx.Response, max_bytes: int) -> str:
         body += chunk
         if len(body) > max_bytes:
             raise ResponseTooLargeError(f"response too large (over {max_bytes} bytes)")
-    return bytes(body).decode(response.charset_encoding or "utf-8", errors="replace")
+    encoding = response.charset_encoding or "utf-8"
+    try:
+        codecs.lookup(encoding)
+    except LookupError:
+        # A server declaring `charset=utf8mb4` or similar used to fail the page
+        # on every run. httpx's own decoding falls back here too.
+        encoding = "utf-8"
+    return bytes(body).decode(encoding, errors="replace")

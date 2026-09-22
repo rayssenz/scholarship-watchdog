@@ -290,3 +290,18 @@ def test_a_3xx_page_without_a_location_is_read_as_a_page():
     result = fetcher.fetch(WATCH, WATCH.url)
     assert result.status == "ok"
     assert "1 October 2027" in result.markdown
+
+
+def test_an_unknown_charset_falls_back_rather_than_failing_the_page():
+    """A server declaring `charset=utf8mb4` made the capped reader raise
+    LookupError on every run. httpx's own decoding falls back for the same
+    header, so moving to the capped reader had quietly regressed it."""
+    html = (FIXTURES / "daad_watch_with_deadline.html").read_bytes()
+    fetcher, _ = _fetcher(
+        lambda r: httpx.Response(
+            200, content=html, headers={"Content-Type": "text/html; charset=utf8mb4"}
+        )
+    )
+    result = fetcher.fetch(WATCH, WATCH.url)
+    assert result.status == "ok"
+    assert "1 October 2027" in result.markdown
