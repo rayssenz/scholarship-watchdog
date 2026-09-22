@@ -4,7 +4,7 @@ An autonomous agent that watches scholarship websites so a deadline never passes
 
 It runs unattended once a week on GitHub Actions, detects which pages actually changed, extracts each opportunity into one normalised record with an LLM, scores it against a private eligibility profile in plain Python, and emails only what is new or has materially moved.
 
-**Status: specification complete and reviewed, registry verified, implementation starting at P1.** This repository is being built in the open, spec first. What that means and why is in [`docs/process.md`](docs/process.md).
+**Status: phase 1 of 5.** The fetch stage is built and verified against the live registry: it reads every registered page, detects real changes, and raises an alert when a page breaks. Extraction, scoring and notification are phases 2 to 4. The evidence is in [`docs/p1-acceptance.md`](docs/p1-acceptance.md). This repository is being built in the open, spec first; what that means and why is in [`docs/process.md`](docs/process.md).
 
 ## The problem
 
@@ -28,24 +28,32 @@ Both diagrams are generated from the `.mmd` sources in [`diagrams/`](diagrams/);
 
 **Value Accuracy, not JSON Pass Rate.** Every current model emits schema-valid JSON around 98% of the time, so schema compliance cannot separate them. What separates them is whether the extracted values are *correct*, and the two diverge by 15 to 30 points. A record can parse cleanly, validate against the schema, and still carry the wrong deadline, which produces a wrong eligibility verdict with nothing raising an error. [`docs/model-selection.md`](docs/model-selection.md) has the benchmark, the statistical argument, and the strongest objection to the choice made.
 
-**Anything shaped by the profile is private, including every artifact produced by acting on it.** This repository is public. Extracted scholarship records are public information and are committed; scores, notifications, the notified log and the auto-grown watch list are not, because eligibility is reconstructible by inference from what got selected. That rule was rediscovered four times in four different places before it was stated once, which is why it now carries a testable invariant.
+**Anything shaped by the profile is private, including every artifact produced by acting on it.** This repository is public. Extracted scholarship records are public information and are committed; scores, notifications, the notified log and the auto-grown watch list are not, because eligibility is reconstructible by inference from what got selected. That rule was rediscovered four times during design and several more during implementation, each time somewhere new, which is why it now carries a testable invariant and why every guard on it is tested by breaking it.
 
 ## Running it
 
-Requires Python 3.12. Not yet runnable: the specification and registry are complete, and implementation begins at P1.
+Requires Python 3.12.
 
 ```bash
-cp config/profile.example.yaml config/profile.yaml   # then fill it in; gitignored
-python scripts/probe_sources.py                      # the registry gate
+python3.12 -m venv .venv && . .venv/bin/activate
+pip install -e ".[dev]"
+scholarship-watchdog fetch          # one pass over the registry; output goes to data/, gitignored
+python scripts/probe_sources.py     # the registry gate
+pytest                              # no test touches the network
 ```
 
-An `age` recipient key and a Firecrawl key are optional. Without them the system runs in report-only mode: nothing is promoted or persisted privately, and JavaScript-rendered sources are skipped with a warning.
+`fetch` prints one line per source, `changed`, `unchanged`, `broken` or `failed`, writes a run report to `data/runs/`, and exits non-zero when a public source raised an alert. Run it twice and the second pass reports every page unchanged.
+
+A Firecrawl key is optional. Set `FIRECRAWL_API_KEY` to fetch the four JavaScript-rendered sources; without it they are reported as skipped, and a source skipped two runs running alerts. The private profile (`cp config/profile.example.yaml config/profile.yaml`, gitignored) is read from phase 2, when scoring arrives.
 
 ## Repository layout
 
 | Path | What |
 | --- | --- |
 | [`SPEC.md`](SPEC.md) | the contract: architecture, schema, scoring, privacy, phases |
+| [`src/scholarship_watchdog/`](src/scholarship_watchdog/) | one package per pipeline stage; `fetch` is built, the rest are stubs |
+| [`tests/`](tests/) | the guards each SPEC section names, each proven by breaking it |
+| [`docs/p1-acceptance.md`](docs/p1-acceptance.md) | phase 1 acceptance, with the command output for every claim |
 | [`docs/model-selection.md`](docs/model-selection.md) | why this model, with a dated decision log |
 | [`docs/process.md`](docs/process.md) | the five development stages |
 | [`docs/git-conventions.md`](docs/git-conventions.md) | branching, commits, the orphan `data` branch |

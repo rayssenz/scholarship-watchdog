@@ -93,6 +93,12 @@ Role replaces the earlier `expects_dates` flag, which was a patch over this miss
 
 **Discover-role cleaning preserves hyperlink targets.** Default trafilatura cleaning discards `href` attributes with the navigation, which would leave the extractor reading programme names as text with no link to follow. Hrefs are canonicalised before hashing, so a portal rotating tracking parameters does not register as changed.
 
+That guarantee has a measured limit, recorded here rather than discovered in production. A bare index of links loses its `href` attributes: the text of each link survives, the target does not. Measured against the registry on 2026-09-05: the NTU postgraduate page kept 16 links from 2203 characters, the Kyoto page kept 2 from 5173, and the JASSO index yielded 280 characters and no links.
+
+Two conditions decide whether targets survive, and neither is the amount of surrounding prose. Measured on trafilatura 1.12.2 on 2026-09-14, against synthetic pages varying one factor at a time. First, the extraction has to land in a region trafilatura treats as main content: a list inside a `<main>` element kept its targets, and the same list at the top level of `<body>` lost every one of them at sizes from three to forty entries. Second, the list has to be large enough: inside `<main>`, three entries still lost their targets where twenty kept them. Adding prose does not rescue a small list and can make matters worse, because at three entries the prose was retained and the link list was dropped entirely.
+
+The practical reading is that a portal whose links sit in a recognisable content region, among enough sibling entries, keeps them, and a sparse or structurally flat index does not. The `never yielded a candidate` flag in this section is what stops that being silent, and P2 owns the fix, because the fallback worth building is the one the extractor can be measured against on the golden set. Building it before there is an extractor would be guessing at the consumer's requirements.
+
 A bounded one-level crawl (`follow_links`) was specified in an earlier draft and is removed. Discovery plus promotion reaches the same leaf pages and verifies each one before adopting it, which the crawl did not. The condition for re-adding it is recorded in `docs/design/2026-08-29-source-model-design.md`: run reports showing discovery consistently fails to surface links on index pages.
 
 **Snapshots are keyed by `(source_id, page_url)`**, so each page hashes and advances independently.
@@ -101,15 +107,25 @@ A bounded one-level crawl (`follow_links`) was specified in an earlier draft and
 
 An unchanged page terminates the pipeline for that page. This is the primary cost control.
 
-**Health checks run before the skip gate**, because a broken source is by construction unchanged after its first broken fetch: the error page becomes the stored snapshot, the next run sees no change, and any alarm placed after the gate can never fire. Checking the fetch result rather than the extraction count is what makes breakage detectable at all.
+**Health checks run before the skip gate**, because an alarm placed after it can never fire for a page that stays broken and unchanged. A page the checks call broken is never stored (see below), so the gate meets a broken page only when the stored snapshot was already broken before anything flagged it: written before a new error signature was added, or before this rule existed. That page is identical every week, and a check behind the gate would stay silent for it indefinitely. Checking the fetch result rather than the extraction count is what makes breakage detectable at all.
 
 | Check | Alerts when |
 | --- | --- |
 | Content collapse | cleaned markdown is under 40% of the previous snapshot |
-| Error signature | text matches "enable JavaScript", "Access Denied", a bare 4xx/5xx page |
+| Error signature | the page is empty, names a vendor bot wall, or is short (under 1,500 characters) and matches a generic error phrase such as "Access Denied" or "enable JavaScript" |
 | Skipped source | a source is skipped twice running (missing Firecrawl key, repeated fetch failure) |
 
-A per-source staleness figure is reported in the run report but does not alert. Scholarship pages legitimately go six to twelve months unchanged, so any configured cadence would either never fire or cry wolf, and there is no data to tune fourteen of them against.
+Bot walls belong in that list because they are the common case for a university portal and they are all served with HTTP 200. The P1 acceptance run measured one getting past every other pattern: an Imperva block whose entire body was `Request unsuccessful. Incapsula incident ID: ...`. A `watch` source caught it only because the deadline check fired; a `discover` source blocked the same way would have passed silently. Generic phrases are treated differently from vendor ones because real pages contain them too: a scholarship FAQ saying "if the portal says you do not have permission, log out" is content, and since a broken page is never stored, matching it would freeze a good page. Error pages are short and scholarship pages are not, so a generic phrase counts only on a short page, while a vendor's interstitial phrase counts at any length.
+
+**A page the error-signature or content-collapse check rejects is marked broken, and broken is not the same question as changed.** A bot wall regenerates its incident ID on every request, so its hash never settles: it is genuinely changed every run and is equally genuinely not new content. The hash therefore stays a truthful statement about the bytes, `broken` carries the judgement, and later stages read `broken` when deciding whether a page is worth extracting or notifying on. A page that merely lacks a deadline is not broken; it is real content that fails a different expectation.
+
+**A broken page is stored exactly as a failed fetch is: not at all.** Section 4 requires a failed page to keep its stored snapshot, so a fetch that raises, times out, or returns HTTP 400 or worse stores nothing and the next weekly run retries it. A page that returns HTTP 200 but carries an "Access Denied" body, a bot wall, an empty JavaScript shell, or a collapse to under 40% of the previous snapshot succeeded at the transport level and failed at every level that matters, and it is handled the same way: the last good snapshot is kept, and the health check alerts on that run and on every run until the page recovers. Both fetchers present the same symptom the same way, so an empty Firecrawl render reaches the check as an ok page with no text, exactly as an empty `httpx` extraction does.
+
+The earlier rule advanced such a page, which cost three things: the broken page overwrote the last real content that later stages need once the site recovers, it became its own baseline so content collapse fired once and then compared the wall against itself, and a Firecrawl render that returned nothing was classified as a failure the content checks never saw. The cost of the current rule is that a false-positive error signature freezes a page's snapshot until the pattern is corrected, which is loud rather than silent.
+
+**A collapse that holds still is adopted.** A page can shrink for real: a programme closes and trims its page to a notice. Kept frozen, it would alert every week forever and a later genuine update would never be stored. So a page that collapses to identical content three runs running becomes the new baseline on the third, and that run's alert says it was adopted. A wall with a rotating reference never holds still and is never adopted. An error signature is never adopted either, because it names itself. The accepted cost is that an unrecognised wall that never changes is adopted after three weeks of alerts. The streak is kept beside the snapshot, on the same side of the privacy boundary.
+
+A per-source staleness figure is reported in the run report but does not alert. Scholarship pages legitimately go six to twelve months unchanged, so any configured cadence would either never fire or cry wolf, and there is no data to tune thirteen of them against.
 
 ### 3.2 `extract`
 
@@ -215,7 +231,7 @@ A single key would be wrong. With identity alone, a programme already notified s
 
 **The identity hash deliberately excludes model output where it can.** `source_id` comes from the registry and cannot drift; `program` is the single model-produced component and is normalised hard. An earlier draft used `sha256(institution + program)` and claimed cross-source dedup as a property: that the same programme found on a university page and on an aggregator would collapse to one row. It cannot work. Both strings are LLM output. "Tsinghua University CSC" and "Chinese Government Scholarship (Tsinghua)" never collide, and `institution` for a government scheme is whatever the model called the ministry that run. The claim is withdrawn rather than softened.
 
-**Cross-source duplication is handled by a hand-maintained alias file** in `config/aliases.yaml`, listing identity hashes to merge. At fourteen sources this is a few lines, edited when a duplicate is noticed. A residual remains and is worth stating: `normalize()` reduces paraphrase churn without eliminating it, so "CSC Bilateral Program" and "Chinese Government Scholarship Bilateral Program" survive normalisation as distinct records. The failure mode degrades from a silently split identity to an occasional duplicate email, which for a single user is cheap and self-corrects once a source's wording settles.
+**Cross-source duplication is handled by a hand-maintained alias file** in `config/aliases.yaml`, listing identity hashes to merge. At thirteen sources this is a few lines, edited when a duplicate is noticed. A residual remains and is worth stating: `normalize()` reduces paraphrase churn without eliminating it, so "CSC Bilateral Program" and "Chinese Government Scholarship Bilateral Program" survive normalisation as distinct records. The failure mode degrades from a silently split identity to an occasional duplicate email, which for a single user is cheap and self-corrects once a source's wording settles.
 
 Stripping years in `normalize()` is load-bearing beyond tidiness: it is what makes an annually re-listed programme collapse onto its existing identity, so the new intake registers as a content change on a known record rather than as a new discovery.
 
@@ -267,8 +283,23 @@ data/
   snapshots/<source_id>/<page_slug>.md   public sources only
   records.jsonl                          public records, sorted keys
   runs/<timestamp>.json                  run reports, public sources only
+  health.json                            consecutive-skip counters, public sources only
   private.age                            everything else; see section 5
 ```
+
+`health.json` holds the consecutive-skip counters the third health check in
+section 3.1 needs. They are cross-run state and the check cannot fire without
+them. Public sources only: a counter naming a private source would put an
+aggregate about private state in the committed tree, which section 5 forbids
+even for counts. Private counters join the bundle in P3.
+
+Before P3 builds the bundle, private snapshots go to a gitignored `.private/`
+directory in the checkout root, and private sources are not counted at all: the
+skipped-source check cannot fire for a private source until its counter has a
+private home in the bundle. The destination is chosen in one
+module rather than at each call site, because section 5 records this leak being
+rediscovered four times, and every rediscovery was a new output path applying
+the rule from memory.
 
 **Write protocol.** The run is a single pass, and the ordering is load-bearing at three points:
 
@@ -376,20 +407,21 @@ One consequence is worth stating rather than discovering later. Section 3.6 just
 
 ## 6. Phases
 
-Each phase ends with a tagged, working state and a demonstrable artifact.
+Each phase ends with a working state and a demonstrable artifact. Phases are not tagged; the first tag is `v0.1.0`, at the end of P5.
 
 An earlier split placed promotion in P2, while promotion writes the private bundle and reports through the digest, both of which are P3. Promotion could not have been built or tested end to end where it sat, so it moves to its own phase after the machinery it depends on exists.
 
-**P1, foundation (~3h).** Project scaffold: `pyproject.toml` pinning Python 3.12, ruff, pytest, CI on push, and the package layout `src/watchdog/{fetch,extract,score,store,notify}/` with tests in `tests/<stage>/`; Pydantic record schema and YAML config loading with a sanitized example profile; the fetch stage with roles, `(source_id, page_url)` snapshot storage, change detection, link-preserving cleaning for discover sources, and fetch-stage health checks.
+**P1, foundation (~3h).** Project scaffold: `pyproject.toml` pinning Python 3.12, ruff, pytest, CI on push, and the package layout `src/scholarship_watchdog/{fetch,extract,score,store,notify}/` with tests in `tests/<stage>/`; Pydantic record schema and YAML config loading with a sanitized example profile; the fetch stage with roles, `(source_id, page_url)` snapshot storage, change detection, link-preserving cleaning for discover sources, and fetch-stage health checks. The package is `scholarship_watchdog` rather than `watchdog`, which is taken on PyPI by a widely installed filesystem-monitoring library; shadowing it would make `import watchdog` resolve differently depending on what else is installed.
 *Acceptance:* a manual run fetches every registered page, writes snapshots, and produces usable JSON; a second run reports every page unchanged; a source serving an error page trips a health check rather than passing silently; the role-aware probe fails a `watch` source with no deadline and passes a `discover` source without one; tests and lint pass in CI.
+*As delivered,* recorded so a later phase does not rediscover it. With no extraction yet, the fetch stage advances each page's snapshot itself, as soon as the page passes its health check; section 3.6 places the advance at step 8, after extraction, scoring and notification, and P2 has to move it there or a failed extraction will lose the change it was processing. The thresholds `notify_tiers`, `verification_cap` and `transient_max_attempts` from section 3.3 are not modelled yet; P3 and P4 own their consumers. The per-source page cap in section 3.1 is moot while every source is one URL. Fetch-stage items deferred with reasons: memory held by a decompressed response before the byte cap sees it, an overall wall-clock deadline per request, change diffs in the run report, a deadline check that pairs any date with any deadline word, and rate limiting and a project user agent on the Firecrawl path. One privacy residual is accepted for P1 by decision: a malformed private config file stops the run with exit 2 and a one-line error naming that file, which reveals that the private file has a fault but nothing of its contents. Skipping the file instead would drop the user's most important watch pages without a word while no private channel exists. Two more residuals are recorded rather than fixed. The run's duration still depends on the private registry: private and public fetches share one per-host rate limiter, so a private page on a portal's host delays that portal's public fetch, and the report's timestamps and filename carry the difference; P3 fetches public sources first and stamps the report from the public pass alone. The staleness figure is read from each snapshot file's modification time, which a fresh checkout resets, so from P3 it needs a stored last-changed date. When P3 creates the `data` branch, its own `.gitignore` drops the `data/` line but must keep `.private/`.
 
 **P2, intelligence (~5h).** Extraction behind the `Extractor` protocol with structured output, including discover-mode extraction emitting `candidate_url`; the golden eval set with both watch and discover cases, its CI gate and the model benchmark it doubles as; deterministic scoring with the null policy, tier thresholds and profile-hash re-evaluation; the JSONL store with dual hashing.
 *Acceptance:* changed pages produce validated records; a discover page produces stubs carrying resolved links; the eval suite passes and demonstrably fails on a deliberately degraded prompt; scoring is covered by unit tests including every null-policy row and the `next-cycle` routing.
 
-**P3, autonomy (~4h).** The email notifier with at-least-once idempotency, alias-aware notified-log lookup and seed mode; the private bundle with decrypt-at-start and corrupt-bundle abort; the Actions workflow with concurrency group and state commit to the `data` branch; the run report; the budget alarm covering fetch credits; the external dead-man's switch; a replay command that re-runs extraction over stored snapshots without refetching.
+**P3, autonomy (~4h).** The email notifier with at-least-once idempotency, alias-aware notified-log lookup and seed mode; the private bundle with decrypt-at-start and corrupt-bundle abort; the Actions workflow with concurrency group and state commit to the `data` branch; the run report; the budget alarm covering fetch credits; the external dead-man's switch; private config errors routed to the digest while the public run continues, closing the P1 residual; a replay command that re-runs extraction over stored snapshots without refetching.
 *Acceptance:* two clean `workflow_dispatch` runs; a re-run sends no duplicate notification; a seeded first run emits one digest rather than per-record mail; no file in the public checkout depends on private config; the weekly cron is enabled only after those two runs.
 
-**P4, promotion (~3h).** The verification queue with canonical-URL state, the fitness gate, promotion into `watched.local.yaml`, eviction, and the cap with held candidates.
+**P4, promotion (~3h).** The verification queue with canonical-URL state, the fitness gate, promotion into `watched.local.yaml`, which never writes an id a public source already uses, since even a redacted duplicate-id error would reveal that a public programme was promoted; eviction, and the cap with held candidates.
 *Acceptance:* a candidate link to a login page is rejected rather than promoted; a page with dates but no deadline (the PKU case) is rejected; the same programme on two portals promotes once; a promoted page failing three times is evicted, not alerted a fourth time; a candidate held at the cap promotes without re-verification when capacity appears.
 
 **P5, presentation (~2h).** README with architecture diagram and demo, and a tagged `v0.1.0` release.

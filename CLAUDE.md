@@ -31,8 +31,8 @@ a docstring or a commit message; fixtures use `config/profile.example.yaml` and 
 sources only. P3 owes an automated test for the invariant in section 5; until it exists,
 this check is manual.
 
-Anything touching secrets, the profile, `.gitignore` or CI runs `vibesec` before it is
-committed.
+Anything touching secrets, the profile, `.gitignore` or CI gets a security review
+before it is committed.
 
 ### No implementation code before the spec covering it is settled
 
@@ -87,7 +87,7 @@ checkpoint for review instead of looping autonomously to completion.**
 2. [Step] → verify: [check]
 ```
 
-In a non-interactive run (subagent, cron, CI) where rule 1 cannot ask, state the
+In a non-interactive run (cron, CI) where rule 1 cannot ask, state the
 assumption in the output and continue.
 
 ---
@@ -115,7 +115,7 @@ phase state, so it does not go stale when a phase ships.
   while `watched.local.yaml` is machine-written and has none by design.
 - **Design decisions with alternatives considered → `docs/`.** A decision that took
   research gets a note with a dated log, as `docs/model-selection.md` does.
-- **Diagrams → edit the `.mmd`, regenerate with the `diagram` skill, then run
+- **Diagrams → edit the `.mmd`, regenerate the SVG and PNG, then run
   `python scripts/sync_diagrams.py`.** The `.mmd` files are the single source of truth.
   SPEC embeds them as native mermaid and the sync script stops that copy drifting; README
   embeds the rendered SVGs, which display in any viewer. The SVGs carry a white background
@@ -133,11 +133,13 @@ Scoring carries no LLM call and no I/O, so it is a pure function of
 
 ### Verify (run from repo root)
 
-Runs today:
-
 ```bash
-pip install pyyaml && python scripts/probe_sources.py   # registry gate
-python scripts/sync_diagrams.py --check              # SPEC mermaid matches .mmd; SVGs carry a background
+pip install -e ".[dev]"                   # once, into a Python 3.12 environment
+ruff check . && ruff format --check .
+pytest                                    # the golden-set eval gate joins in P2
+python scripts/sync_diagrams.py --check   # SPEC mermaid matches .mmd; SVGs carry a background
+python scripts/probe_sources.py           # registry gate, live network
+scholarship-watchdog fetch                # one real pass over the registry, live network
 ```
 
 The probe hits the live network, so results vary with host availability, and it is not a
@@ -145,19 +147,13 @@ CI gate. A source it cannot reach this run is reported and excluded rather than 
 since a timeout is a network fact and not a registry defect. A browser-only source is
 judged against the `verified` note the registry carries from a hand-check.
 
-From P1, once `pyproject.toml` exists:
-
-```bash
-ruff check .
-pytest              # the golden-set eval gate joins in P2
-```
-
 ### Git
 
-Trunk-based, short-lived branches, Conventional Commits on one line, squash-merge to a
-protected `main`. The `data` branch is an orphan holding runtime state and is never
+Trunk-based, short-lived branches, Conventional Commits on one line. A single-idea branch
+is squash-merged; a phase branch, whose commits are each one idea, is rebase-merged. Branch
+protection on `main` is switched on once CI has run on a pull request. The `data` branch is an orphan holding runtime state and is never
 merged. Full rationale in [`docs/git-conventions.md`](./docs/git-conventions.md).
 
-Documents that ship to a reader (`README.md`, `SPEC.md`, `docs/`) avoid em dashes and
-AI-writing patterns, and `humanizer` is run on them. Commit messages, code comments and
-this file are exempt: their formatting is doing a job.
+Documents that ship to a reader (`README.md`, `SPEC.md`, `docs/`) get an editing pass
+for tone and concision, and avoid em dashes. Commit messages, code comments and this
+file are exempt: their formatting is doing a job.

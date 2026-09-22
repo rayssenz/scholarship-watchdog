@@ -21,8 +21,9 @@ profile.yml
 # own .gitignore without this line rather than the workflow using `git add -f`.
 data/
 
-# Decrypted private bundle. The run decrypts outside the working tree, but this
-# is the second line of defence if that ever regresses.
+# Private runtime state. Until P3 builds the encrypted bundle, the snapshots of
+# private sources live here in plaintext. From P3 the bundle is decrypted outside
+# the working tree, and this line is the second line of defence if that regresses.
 .private/
 *.decrypted
 
@@ -44,6 +45,10 @@ age-key.txt
 # in the history read as bulk rather than as work. A short summary may be
 # committed once a phase lands.
 docs/plans/
+
+# Build scratch: task briefs, progress ledgers, review packages. Working
+# artifacts of how the code got written, never part of the code.
+.superpowers/
 
 # Python
 __pycache__/
