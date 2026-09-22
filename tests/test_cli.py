@@ -571,3 +571,20 @@ def test_the_summary_says_broken_rather_than_changed(tmp_path):
 
     run = fetch_all([PUBLIC_WATCH], fetchers={"httpx": AccessDeniedPage()}, repo_root=tmp_path)
     assert render_summary(run) == [f"{'daad-study':<32} {'watch':<9} broken"]
+
+
+def test_an_unreadable_snapshot_or_health_file_does_not_end_the_run(tmp_path):
+    """A snapshot or health.json that is not valid UTF-8 raised out of
+    fetch_all: no report, no ledger, and an exit status that could depend on a
+    private file. A stored snapshot is a cache, so a corrupt one is treated as
+    missing and replaced by the page as it is now."""
+    from scholarship_watchdog.paths import health_path, snapshot_path
+
+    snap = snapshot_path(PUBLIC_WATCH, PUBLIC_WATCH.url, repo_root=tmp_path)
+    snap.parent.mkdir(parents=True)
+    snap.write_bytes(b"\xff\xfe not utf-8 \xff")
+    health_path(repo_root=tmp_path).write_bytes(b"\xff\xfe")
+
+    run = fetch_all([PUBLIC_WATCH], fetchers={"httpx": RecordingFetcher()}, repo_root=tmp_path)
+    assert run.pages[0].advanced is True
+    assert snap.read_text(encoding="utf-8") == "Application deadline: 1 October 2027"

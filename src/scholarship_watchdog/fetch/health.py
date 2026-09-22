@@ -167,7 +167,7 @@ class SkipLedger:
             return cls(path, {})
         try:
             counts = json.loads(path.read_text()).get("consecutive_skips")
-        except (json.JSONDecodeError, AttributeError):
+        except (json.JSONDecodeError, AttributeError, UnicodeDecodeError, OSError):
             return cls(path, {})
         valid = isinstance(counts, dict) and all(
             isinstance(k, str) and type(v) is int and v >= 0 for k, v in counts.items()

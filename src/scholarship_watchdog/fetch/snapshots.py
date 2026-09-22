@@ -50,9 +50,13 @@ class Change:
 def read_previous(source: Source, page_url: str, *, repo_root: Path | None = None) -> PageState:
     """Load the stored snapshot, or an empty state on a first run."""
     path = snapshot_path(source, page_url, repo_root=repo_root)
-    if not path.exists():
+    try:
+        markdown = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        # Missing is the first run. Unreadable is treated the same way: a
+        # snapshot is a cache of a public page, so the cost of losing one is a
+        # single "changed", and raising here used to end the whole run.
         return PageState(previous_markdown=None, previous_hash=None)
-    markdown = path.read_text(encoding="utf-8")
     return PageState(previous_markdown=markdown, previous_hash=content_hash(markdown))
 
 
