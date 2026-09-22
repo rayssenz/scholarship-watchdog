@@ -15,11 +15,14 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
 from ..models import Source
-from ..paths import snapshot_path
+from ..paths import pending_path, snapshot_path
+
+ADOPT_AFTER = 3
 
 
 def content_hash(markdown: str) -> str:
@@ -89,3 +92,31 @@ def advance(source: Source, page_url: str, markdown: str, *, repo_root: Path | N
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(markdown, encoding="utf-8")
     return path
+
+
+def note_collapse(
+    source: Source, page_url: str, content: str, *, repo_root: Path | None = None
+) -> int:
+    """Count one more collapsed fetch and return the identical run so far.
+
+    A page that shrinks for real (a programme closes and trims its page) stays
+    identical week after week. A wall with a rotating reference does not. So a
+    collapse that repeats with the same hash ADOPT_AFTER times running is taken
+    as the page's new content (SPEC.md section 3.1). An unreadable note starts
+    the count again rather than failing the run.
+    """
+    path = pending_path(source, page_url, repo_root=repo_root)
+    digest = content_hash(content)
+    try:
+        note = json.loads(path.read_text(encoding="utf-8"))
+        streak = note["count"] + 1 if note["hash"] == digest else 1
+    except (OSError, ValueError, KeyError, TypeError):
+        streak = 1
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"hash": digest, "count": streak}), encoding="utf-8")
+    return streak
+
+
+def clear_collapse(source: Source, page_url: str, *, repo_root: Path | None = None) -> None:
+    """Any outcome other than another collapse ends the streak."""
+    pending_path(source, page_url, repo_root=repo_root).unlink(missing_ok=True)

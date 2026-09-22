@@ -22,7 +22,15 @@ from ..models import Source
 from ..paths import snapshot_path
 from .base import Fetcher, FetchResult, FetchStatus
 from .health import Alert, SkipLedger, check_page
-from .snapshots import Change, advance, detect_change, read_previous
+from .snapshots import (
+    ADOPT_AFTER,
+    Change,
+    advance,
+    clear_collapse,
+    detect_change,
+    note_collapse,
+    read_previous,
+)
 
 __all__ = [
     "Alert",
@@ -126,9 +134,9 @@ def fetch_all(
 
         previous = read_previous(source, source.url, repo_root=repo_root)
         page_alerts = check_page(source, result, previous)
-        run.alerts.extend(page_alerts)
 
         if not result.is_ok or result.markdown is None:
+            run.alerts.extend(page_alerts)
             run.pages.append(PageOutcome(source, result, None, advanced=False))
             continue
 
@@ -144,6 +152,35 @@ def fetch_all(
         # changed every run and equally genuinely not new content.
         broken = any(a.check in BROKEN_CHECKS for a in page_alerts)
         change = detect_change(previous, result.markdown)
+
+        # A collapse that stays identical ADOPT_AFTER times running is the page's
+        # new content, not a wall: a programme that closed and trimmed its page.
+        # Without this the page stayed frozen and alerting forever, and a later
+        # real update was never stored (ruling recorded in SPEC 3.1). An error
+        # signature is never adopted: it says what it is.
+        collapse_only = broken and all(a.check != "error_signature" for a in page_alerts)
+        if collapse_only:
+            if (
+                note_collapse(source, source.url, result.markdown, repo_root=repo_root)
+                >= ADOPT_AFTER
+            ):
+                broken = False
+                clear_collapse(source, source.url, repo_root=repo_root)
+                page_alerts = [
+                    Alert(
+                        a.source_id,
+                        a.check,
+                        f"{a.detail}; identical for {ADOPT_AFTER} runs, "
+                        "adopted as the new baseline",
+                    )
+                    if a.check == "content_collapse"
+                    else a
+                    for a in page_alerts
+                ]
+        else:
+            clear_collapse(source, source.url, repo_root=repo_root)
+
+        run.alerts.extend(page_alerts)
         advanced = change.changed and not broken
         if advanced:
             advance(source, source.url, result.markdown, repo_root=repo_root)

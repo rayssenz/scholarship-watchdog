@@ -416,8 +416,8 @@ def test_content_collapse_alerts_every_week_rather_than_once(tmp_path):
     """The collapsed page used to become the new baseline, so the check fired in
     week two and was silent from week three onwards. An unrecognised bot wall
     on a discover source got exactly one digest line."""
-    wall = "Please wait while we check your connection. Ref 12345."
-    fetcher = Sequence(GOOD, wall, wall, wall)
+    walls = [f"Please wait while we check your connection. Ref {n}." for n in range(3)]
+    fetcher = Sequence(GOOD, *walls)
     fetch_all([PUBLIC_DISCOVER], fetchers={"httpx": fetcher}, repo_root=tmp_path)
     for week in (2, 3, 4):
         run = fetch_all([PUBLIC_DISCOVER], fetchers={"httpx": fetcher}, repo_root=tmp_path)
@@ -588,3 +588,61 @@ def test_an_unreadable_snapshot_or_health_file_does_not_end_the_run(tmp_path):
     run = fetch_all([PUBLIC_WATCH], fetchers={"httpx": RecordingFetcher()}, repo_root=tmp_path)
     assert run.pages[0].advanced is True
     assert snap.read_text(encoding="utf-8") == "Application deadline: 1 October 2027"
+
+
+SHRUNK = "This programme is closed for 2027. The next call opens in spring 2028. " * 8
+
+
+def _weeks(tmp_path, source, bodies):
+    fetcher = Sequence(*bodies)
+    return [fetch_all([source], fetchers={"httpx": fetcher}, repo_root=tmp_path) for _ in bodies]
+
+
+def test_a_page_that_really_shrank_is_adopted_after_three_identical_weeks(tmp_path):
+    """Ruling R17. A collapse used to freeze the page forever: a programme that
+    closed and trimmed its page alerted every week, and a later real update was
+    never stored. A page that stays identical three weeks running is not a
+    rotating wall, so on the third it becomes the new baseline, and that week's
+    alert says so."""
+    runs = _weeks(tmp_path, PUBLIC_DISCOVER, [GOOD, SHRUNK, SHRUNK, SHRUNK, SHRUNK])
+    checks = [[a.check for a in r.alerts] for r in runs]
+    assert checks == [[], ["content_collapse"], ["content_collapse"], ["content_collapse"], []]
+    assert [r.pages[0].broken for r in runs] == [False, True, True, False, False]
+    assert "adopted" in runs[3].alerts[0].detail
+    assert _stored(tmp_path, PUBLIC_DISCOVER) == SHRUNK
+
+
+def test_an_update_after_adoption_is_seen(tmp_path):
+    update = SHRUNK + " New: application deadline 1 March 2028."
+    runs = _weeks(tmp_path, PUBLIC_DISCOVER, [GOOD, SHRUNK, SHRUNK, SHRUNK, update])
+    assert runs[4].pages[0].advanced is True
+    assert _stored(tmp_path, PUBLIC_DISCOVER) == update
+
+
+def test_a_collapsed_page_that_keeps_changing_is_never_adopted(tmp_path):
+    """A wall with a rotating reference never holds still, so it never
+    becomes the baseline however long it lasts."""
+    walls = [f"Please wait while we check your connection. Ref {n}." for n in range(6)]
+    runs = _weeks(tmp_path, PUBLIC_DISCOVER, [GOOD, *walls])
+    assert all(r.pages[0].broken for r in runs[1:])
+    assert _stored(tmp_path, PUBLIC_DISCOVER) == GOOD
+
+
+def test_a_recovery_resets_the_adoption_streak(tmp_path):
+    runs = _weeks(tmp_path, PUBLIC_DISCOVER, [GOOD, SHRUNK, SHRUNK, GOOD, SHRUNK, SHRUNK])
+    assert [r.pages[0].broken for r in runs] == [False, True, True, False, True, True]
+    assert _stored(tmp_path, PUBLIC_DISCOVER) == GOOD
+
+
+def test_an_error_page_is_never_adopted_however_steady(tmp_path):
+    """Only a collapse can be adopted. A page that names itself an error page
+    stays broken until it recovers."""
+    runs = _weeks(tmp_path, PUBLIC_WATCH, [GOOD] + ["Access Denied."] * 5)
+    assert all(r.pages[0].broken for r in runs[1:])
+    assert _stored(tmp_path, PUBLIC_WATCH) == GOOD
+
+
+def test_a_private_page_keeps_its_adoption_note_private(tmp_path):
+    _weeks(tmp_path, PRIVATE_WATCH, [GOOD, SHRUNK])
+    assert list((tmp_path / ".private").rglob("*.pending.json"))
+    assert not (tmp_path / "data").exists() or not list((tmp_path / "data").rglob("*.pending.json"))

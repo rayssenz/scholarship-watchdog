@@ -123,6 +123,8 @@ Bot walls belong in that list because they are the common case for a university 
 
 The earlier rule advanced such a page, which cost three things: the broken page overwrote the last real content that later stages need once the site recovers, it became its own baseline so content collapse fired once and then compared the wall against itself, and a Firecrawl render that returned nothing was classified as a failure the content checks never saw. The cost of the current rule is that a false-positive error signature freezes a page's snapshot until the pattern is corrected, which is loud rather than silent.
 
+**A collapse that holds still is adopted.** A page can shrink for real: a programme closes and trims its page to a notice. Kept frozen, it would alert every week forever and a later genuine update would never be stored. So a page that collapses to identical content three runs running becomes the new baseline on the third, and that run's alert says it was adopted. A wall with a rotating reference never holds still and is never adopted. An error signature is never adopted either, because it names itself. The accepted cost is that an unrecognised wall that never changes is adopted after three weeks of alerts. The streak is kept beside the snapshot, on the same side of the privacy boundary.
+
 A per-source staleness figure is reported in the run report but does not alert. Scholarship pages legitimately go six to twelve months unchanged, so any configured cadence would either never fire or cry wolf, and there is no data to tune thirteen of them against.
 
 ### 3.2 `extract`

@@ -65,6 +65,12 @@ def snapshot_path(source: Source, page_url: str, *, repo_root: Path | None = Non
     return snapshot_root(source, repo_root=repo_root) / f"{page_slug(page_url)}.md"
 
 
+def pending_path(source: Source, page_url: str, *, repo_root: Path | None = None) -> Path:
+    """The adoption streak for one page, beside its snapshot and on the same
+    side of the boundary. A private page's streak says what its content did."""
+    return snapshot_path(source, page_url, repo_root=repo_root).with_suffix(".pending.json")
+
+
 def run_report_path(timestamp: datetime, *, repo_root: Path | None = None) -> Path:
     """Run reports are public and cover public sources only (section 5)."""
     stamp = timestamp.strftime("%Y%m%dT%H%M%SZ")
