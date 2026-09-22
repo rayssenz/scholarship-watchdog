@@ -66,3 +66,13 @@ def test_canonicalising_markdown_leaves_the_link_text_alone():
     assert "Nanyang President's Graduate Scholarship" in result
     assert "utm_source" not in result
     assert "https://www.ntu.edu.sg/x/npgs" in result
+
+
+def test_a_malformed_link_is_left_alone_rather_than_failing_the_page():
+    """urlsplit raises on a target such as `http://[broken/x`. Raised inside a
+    fetch, that failed the whole discover page every week, taking every good
+    link on it down with the one bad one."""
+    markdown = "- [Good](/p1?utm_source=x)\n- [Bad](http://[broken/x)"
+    out = canonicalise_markdown_links(markdown, base="https://a.example/portal")
+    assert "https://a.example/p1" in out
+    assert "http://[broken/x" in out

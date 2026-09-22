@@ -63,6 +63,11 @@ def canonicalise_markdown_links(markdown: str, *, base: str) -> str:
 
     def replace(match: re.Match[str]) -> str:
         text, target, _title = match.groups()
-        return f"[{text}]({canonical_url(target, base=base)})"
+        try:
+            return f"[{text}]({canonical_url(target, base=base)})"
+        except ValueError:
+            # One malformed href (`http://[broken/x`) is left as written. Raised
+            # from here it failed the whole page, every good link with it.
+            return match.group(0)
 
     return _MARKDOWN_LINK.sub(replace, markdown)
