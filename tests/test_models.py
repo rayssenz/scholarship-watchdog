@@ -181,3 +181,33 @@ def test_a_rejected_source_value_is_not_echoed_in_the_error():
 def test_a_source_url_must_be_an_http_url_with_a_host(url):
     with pytest.raises(ValidationError):
         Source(id="s", name="S", role="watch", url=url)
+
+
+@pytest.mark.parametrize(
+    "bad_id",
+    [
+        "../../data/snapshots/embassy-xx",
+        "a/b",
+        "..",
+        "",
+        "Upper",
+        "-leading",
+        "has space",
+        "x" * 65,
+    ],
+)
+def test_a_source_id_must_be_a_plain_slug(bad_id):
+    """The id becomes a directory name under the snapshot root. An id such as
+    `../../data/snapshots/embassy-xx` in a private file routed that private
+    source's snapshot into the public tree, past the one module whose job is to
+    keep them apart. From P4 ids are written by machine from scraped pages."""
+    with pytest.raises(ValidationError):
+        Source(id=bad_id, name="S", role="watch", url="https://example.org/p")
+
+
+def test_every_registered_source_id_is_a_valid_slug():
+    from pathlib import Path
+
+    from scholarship_watchdog.config import load_sources
+
+    assert load_sources(Path(__file__).resolve().parent.parent / "config")

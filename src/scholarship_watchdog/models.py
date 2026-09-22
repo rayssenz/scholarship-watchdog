@@ -9,11 +9,14 @@ to do.
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from typing import Literal, Self
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+
+_SOURCE_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 
 Role = Literal["watch", "discover"]
 FetcherName = Literal["httpx", "firecrawl"]
@@ -134,6 +137,22 @@ class Source(Strict):
             "artifact produced from it is private; see SPEC.md section 5."
         ),
     )
+
+    @field_validator("id")
+    @classmethod
+    def _a_plain_slug(cls, source_id: str) -> str:
+        """The id becomes a directory name under the snapshot root, so it may
+        not say anything a path could act on.
+
+        An id such as `../../data/snapshots/embassy-xx` in a private file routed
+        that private source's snapshot into the public tree, past the one module
+        whose job is to keep the two apart (SPEC.md section 5). From P4 ids are
+        written by machine from scraped pages, so this cannot rest on the user
+        never making a typo.
+        """
+        if not _SOURCE_ID.fullmatch(source_id):
+            raise ValueError("id must be lowercase letters, digits and hyphens, at most 64")
+        return source_id
 
     @field_validator("url")
     @classmethod

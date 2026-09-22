@@ -116,3 +116,16 @@ def test_every_committed_registry_source_lands_in_an_ignored_path():
     for source in load_sources(REPO / "config"):
         path = snapshot_path(source, source.url, repo_root=REPO)
         assert _git_ignores(path), f"{source.id} -> {path} is committable"
+
+
+def test_a_private_source_can_never_resolve_into_the_public_tree(tmp_path):
+    """The routing guarantee, stated as the property rather than the branch:
+    whatever the id, a private snapshot resolves under the private root."""
+    from scholarship_watchdog.models import Source
+    from scholarship_watchdog.paths import PRIVATE_ROOT, snapshot_path
+
+    source = Source(
+        id="mext-local-embassy", name="E", role="watch", url="https://e.example/p", private=True
+    )
+    resolved = snapshot_path(source, source.url, repo_root=tmp_path).resolve()
+    assert (tmp_path / PRIVATE_ROOT).resolve() in resolved.parents
